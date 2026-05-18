@@ -17,30 +17,37 @@ def process_video(job_id: int, db_url: str) -> None:
     FastAPI's request-scoped session has already closed by the time this runs.
     """
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
-    SessionLocal = sessionmaker(bind=engine)
+    try:
+        SessionLocal = sessionmaker(bind=engine)
 
-    with SessionLocal() as db:
-        job = db.get(Job, job_id)
-        if not job:
-            return
+        with SessionLocal() as db:
+            job = db.get(Job, job_id)
+            if not job:
+                return
 
-        job.status = JobStatus.running
-        db.commit()
-
-        try:
             video = db.get(Video, job.video_id)
-            _run_pipeline(video, job, db)
-            job.status = JobStatus.done
-            job.progress_pct = 100.0
-            video.status = VideoStatus.done
-        except Exception:
-            job.status = JobStatus.error
-            job.error = traceback.format_exc()
-            video = db.get(Video, job.video_id)
-            if video:
+            if not video:
+                job.status = JobStatus.error
+                job.error = f"Video {job.video_id} not found"
+                db.commit()
+                return
+
+            job.status = JobStatus.running
+            db.commit()
+
+            try:
+                _run_pipeline(video, job, db)
+                job.status = JobStatus.done
+                job.progress_pct = 100.0
+                video.status = VideoStatus.done
+            except Exception:
+                job.status = JobStatus.error
+                job.error = traceback.format_exc()[:2000]
                 video.status = VideoStatus.error
 
-        db.commit()
+            db.commit()
+    finally:
+        engine.dispose()
 
 
 def _run_pipeline(video: Video, job: Job, db: Session) -> None:
@@ -68,7 +75,7 @@ def _run_pipeline(video: Video, job: Job, db: Session) -> None:
     db.commit()
 
     # Edit video
-    output_filename = f"processed_match{video.match_id}_set{video.set_number}.mp4"
+    output_filename = f"processed_match{video.match_id}_set{video.set_number}_vid{video.id}.mp4"
     output_path = cut_and_join(video.raw_path, segments, output_filename)
 
     db.add(ProcessedVideo(match_id=video.match_id, output_path=output_path))
