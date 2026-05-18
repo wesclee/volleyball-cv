@@ -61,6 +61,18 @@ docker-compose.yml Spins everything up locally
 
 The pipeline has a swappable detector interface so Tier 1 and Tier 2 are interchangeable. The active model is configurable; Tier 1 is the default until a trained model is promoted.
 
+### Bootstrapping Tier 2
+
+Before any fine-tuned model exists, Tier 2 needs an initial training set. The bootstrap flow:
+
+1. Run Tier 1 on 1–2 matches → get rally timestamps
+2. System extracts frames sampled from within rally segments (ball is likely visible)
+3. User labels those frames with bounding boxes (the one time bbox drawing is the first resort)
+4. ~200–500 labeled frames is enough for an initial fine-tune
+5. After initial training, the active learning loop takes over and bbox work drops to escalation-only
+
+This is a one-time cost. The Active Learning Review view has a "Bootstrap mode" that presents the sampled frames for labeling.
+
 ### Active Learning Loop
 
 ```
