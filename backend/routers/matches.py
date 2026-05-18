@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models.match import Match
-from backend.schemas.match import MatchCreate, MatchRead, ProcessedVideoRead
+from backend.models.match import Match, Video
+from backend.schemas.match import MatchCreate, MatchRead, ProcessedVideoRead, VideoRead
 
 router = APIRouter(prefix="/matches", tags=["matches"])
 
@@ -29,6 +29,14 @@ def get_match(match_id: int, db: Session = Depends(get_db)):
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
     return match
+
+
+@router.get("/{match_id}/videos", response_model=list[VideoRead])
+def list_match_videos(match_id: int, db: Session = Depends(get_db)):
+    match = db.get(Match, match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+    return db.query(Video).filter(Video.match_id == match_id).order_by(Video.set_number).all()
 
 
 @router.post("/{match_id}/export", response_model=list[ProcessedVideoRead])

@@ -1,4 +1,5 @@
 # tests/test_matches.py
+import io
 
 
 def test_create_match(client):
@@ -28,4 +29,28 @@ def test_get_match(client):
 
 def test_get_match_not_found(client):
     resp = client.get("/matches/999")
+    assert resp.status_code == 404
+
+
+def test_list_match_videos(client):
+    match_id = client.post("/matches", json={"date": "2026-05-18"}).json()["id"]
+    # No videos yet
+    resp = client.get(f"/matches/{match_id}/videos")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+    # Upload a video
+    client.post(
+        f"/matches/{match_id}/videos",
+        data={"set_number": "1"},
+        files={"file": ("s.mp4", io.BytesIO(b"x"), "video/mp4")},
+    )
+    resp = client.get(f"/matches/{match_id}/videos")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["set_number"] == 1
+
+
+def test_list_match_videos_not_found(client):
+    resp = client.get("/matches/999/videos")
     assert resp.status_code == 404
