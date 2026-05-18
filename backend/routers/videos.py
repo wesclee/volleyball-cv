@@ -2,11 +2,12 @@
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from backend.config import UPLOADS_DIR
+from backend.config import DATABASE_URL, UPLOADS_DIR
 from backend.database import get_db
+from backend.jobs.processor import process_video as run_processing
 from backend.models.match import Job, Match, Video, VideoStatus
 from backend.schemas.match import JobRead, VideoRead
 
@@ -36,7 +37,11 @@ def upload_video(
 
 
 @router.post("/videos/{video_id}/process", response_model=JobRead, status_code=status.HTTP_202_ACCEPTED)
-def process_video(video_id: int, db: Session = Depends(get_db)):
+def process_video(
+    video_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     video = db.get(Video, video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
@@ -47,5 +52,5 @@ def process_video(video_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(job)
 
-    # Background task wired in Task 9 — returns job immediately
+    background_tasks.add_task(run_processing, job.id, DATABASE_URL)
     return job

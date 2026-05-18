@@ -22,8 +22,9 @@ def test_get_job_status(client):
 
     resp = client.get(f"/jobs/{job_id}")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "pending"
-    assert resp.json()["progress_pct"] == 0.0
+    # Background processor runs synchronously in test client — invalid video causes error
+    assert resp.json()["status"] == "error"
+    assert resp.json()["error"] is not None
 
 
 def test_get_job_not_found(client):
