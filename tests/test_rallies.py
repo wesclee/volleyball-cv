@@ -27,18 +27,24 @@ def test_list_rallies_empty(client):
     assert resp.json() == []
 
 
-def test_list_rallies(client, clean_db):
+def test_list_rallies(client):
     from backend.database import SessionLocal
+    from backend.models.match import Rally
     _, video_id = _setup(client)
     with SessionLocal() as db:
-        _seed_rally(db, video_id)
-        _seed_rally(db, video_id)
+        # Seed in reverse order to verify endpoint sorts correctly
+        db.add(Rally(video_id=video_id, start_time=30.0, end_time=45.0, confidence=1.0))
+        db.add(Rally(video_id=video_id, start_time=5.0, end_time=20.0, confidence=1.0))
+        db.commit()
     resp = client.get(f"/videos/{video_id}/rallies")
     assert resp.status_code == 200
-    assert len(resp.json()) == 2
+    data = resp.json()
+    assert len(data) == 2
+    assert data[0]["start_time"] == 5.0
+    assert data[1]["start_time"] == 30.0
 
 
-def test_patch_rally_score(client, clean_db):
+def test_patch_rally_score(client):
     from backend.database import SessionLocal
     _, video_id = _setup(client)
     with SessionLocal() as db:
