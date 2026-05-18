@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.db
+
+# Data directories
+data/uploads/
+data/exports/
+
+# Environment
+.env
+
+# Virtual environment
+backend/.venv/
+
+# Node
+node_modules/
+
+# Build
+dist/
