@@ -1,7 +1,5 @@
 # tests/test_motion_detector.py
 import subprocess
-import tempfile
-from pathlib import Path
 
 import pytest
 

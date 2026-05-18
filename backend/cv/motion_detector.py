@@ -33,10 +33,12 @@ class MotionDetector(BaseDetector):
 
     def detect(self, video_path: str) -> list[RallySegment]:
         cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Cannot open video: {video_path}")
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        # history=1 so MOG2 builds the background model quickly during warm-up;
-        # after warm-up we freeze the model (learningRate=0) so sustained motion
-        # stays flagged as foreground rather than being absorbed into the background.
+        # history=warmup_frames so MOG2 converges to a stable background model quickly
+        # rather than the default ~500-frame window; after warm-up we freeze with learningRate=0
+        # so sustained foreground motion stays flagged instead of being absorbed into background.
         subtractor = cv2.createBackgroundSubtractorMOG2(history=self.warmup_frames, detectShadows=False)
         scores: list[float] = []
         frame_idx = 0
