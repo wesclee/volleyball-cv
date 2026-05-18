@@ -32,8 +32,7 @@ def source_video(tmp_path):
 
 
 def test_cut_single_segment(source_video, tmp_path, monkeypatch):
-    import backend.config as cfg
-    monkeypatch.setattr(cfg, "EXPORTS_DIR", tmp_path)
+    monkeypatch.setattr("backend.editor.ffmpeg_editor.EXPORTS_DIR", tmp_path)
 
     from backend.cv.detector import RallySegment
     from backend.editor.ffmpeg_editor import cut_and_join
@@ -46,8 +45,7 @@ def test_cut_single_segment(source_video, tmp_path, monkeypatch):
 
 
 def test_cut_multiple_segments(source_video, tmp_path, monkeypatch):
-    import backend.config as cfg
-    monkeypatch.setattr(cfg, "EXPORTS_DIR", tmp_path)
+    monkeypatch.setattr("backend.editor.ffmpeg_editor.EXPORTS_DIR", tmp_path)
 
     from backend.cv.detector import RallySegment
     from backend.editor.ffmpeg_editor import cut_and_join
@@ -63,8 +61,7 @@ def test_cut_multiple_segments(source_video, tmp_path, monkeypatch):
 
 
 def test_no_segments_raises(source_video, tmp_path, monkeypatch):
-    import backend.config as cfg
-    monkeypatch.setattr(cfg, "EXPORTS_DIR", tmp_path)
+    monkeypatch.setattr("backend.editor.ffmpeg_editor.EXPORTS_DIR", tmp_path)
 
     from backend.editor.ffmpeg_editor import cut_and_join
 
