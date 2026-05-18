@@ -9,3 +9,10 @@ services:
     environment:
       - DATA_DIR=/app/data
       - DATABASE_URL=sqlite:////app/data/volleyball_cv.db
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
