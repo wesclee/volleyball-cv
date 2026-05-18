@@ -20,6 +20,7 @@ def clean_db():
     Base.metadata.create_all(engine)
     yield
     Base.metadata.drop_all(engine)
+    engine.dispose()
     db_path = Path("/tmp/volleyball_cv_test.db")
     if db_path.exists():
         db_path.unlink()
