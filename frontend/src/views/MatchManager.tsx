@@ -9,22 +9,27 @@ export default function MatchManager() {
   const [date, setDate] = useState('')
   const [opponent, setOpponent] = useState('')
   const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     getMatches()
       .then(setMatches)
+      .catch(err => setError(String(err)))
       .finally(() => setLoading(false))
   }, [])
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     setCreating(true)
+    setError(null)
     try {
       const body: MatchCreate = { date }
       if (opponent.trim()) body.opponent = opponent.trim()
       const match = await createMatch(body)
       navigate(`/matches/${match.id}/upload`)
+    } catch (err) {
+      setError(String(err))
     } finally {
       setCreating(false)
     }
@@ -36,6 +41,7 @@ export default function MatchManager() {
     <div className="p-6 max-w-2xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Matches</h1>
 
+      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
       <form onSubmit={handleCreate} className="mb-8 flex flex-wrap gap-2 items-end">
         <div className="flex flex-col gap-1">
           <label htmlFor="date" className="text-xs text-gray-600 font-medium">Date</label>
@@ -48,13 +54,17 @@ export default function MatchManager() {
             className="border rounded px-3 py-1.5 text-sm"
           />
         </div>
-        <input
-          type="text"
-          placeholder="Opponent (optional)"
-          value={opponent}
-          onChange={e => setOpponent(e.target.value)}
-          className="border rounded px-3 py-1.5 text-sm"
-        />
+        <div className="flex flex-col gap-1">
+          <label htmlFor="opponent" className="text-xs text-gray-600 font-medium">Opponent</label>
+          <input
+            id="opponent"
+            type="text"
+            placeholder="(optional)"
+            value={opponent}
+            onChange={e => setOpponent(e.target.value)}
+            className="border rounded px-3 py-1.5 text-sm"
+          />
+        </div>
         <button
           type="submit"
           disabled={creating}

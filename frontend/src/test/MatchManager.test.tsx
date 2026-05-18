@@ -41,7 +41,7 @@ describe('MatchManager', () => {
     render(<MemoryRouter><MatchManager /></MemoryRouter>)
     await screen.findByText('2026-05-18')
 
-    await user.type(screen.getByPlaceholderText(/opponent/i), 'Rivals')
+    await user.type(screen.getByLabelText(/opponent/i), 'Rivals')
     const dateInput = screen.getByLabelText(/date/i)
     await user.type(dateInput, '2026-06-01')
     await user.click(screen.getByRole('button', { name: /new match/i }))
