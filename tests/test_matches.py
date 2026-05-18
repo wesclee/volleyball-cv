@@ -40,11 +40,12 @@ def test_list_match_videos(client):
     assert resp.json() == []
 
     # Upload a video
-    client.post(
+    upload_resp = client.post(
         f"/matches/{match_id}/videos",
         data={"set_number": "1"},
         files={"file": ("s.mp4", io.BytesIO(b"x"), "video/mp4")},
     )
+    assert upload_resp.status_code == 201
     resp = client.get(f"/matches/{match_id}/videos")
     assert resp.status_code == 200
     assert len(resp.json()) == 1

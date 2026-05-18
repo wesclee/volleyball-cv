@@ -24,6 +24,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
