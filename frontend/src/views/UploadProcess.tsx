@@ -114,7 +114,7 @@ export default function UploadProcess() {
               </div>
             )}
             {s.status === 'error' && (
-              <p className="mt-2 text-sm text-red-600">Error: {s.error}</p>
+              <p className="mt-2 text-sm text-red-600">Error: {s.error ?? 'Unknown error'}</p>
             )}
           </div>
         ))}
