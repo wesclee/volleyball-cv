@@ -1,5 +1,6 @@
 # tests/test_bootstrap_routes.py
 import io
+import pytest
 from pathlib import Path
 from backend.database import SessionLocal
 from backend.models.match import FrameStatus, FrameSplit, LabeledFrame, Match, Video, Rally
@@ -86,3 +87,72 @@ def test_get_frame_image_404_when_file_missing(client, tmp_path):
         frame_id = frame.id
     resp = client.get(f"/bootstrap/frames/{frame_id}/image")
     assert resp.status_code == 404
+
+
+def test_annotate_writes_label_file_and_sets_status(client, tmp_path):
+    _, video_id = _setup_video_with_rally(client)
+    img_path = tmp_path / "frame.jpg"
+    img_path.write_bytes(b"fake")
+    label_path = tmp_path / "label.txt"
+    with SessionLocal() as db:
+        frame = _make_frame(db, video_id, str(img_path), str(label_path))
+        frame_id = frame.id
+
+    resp = client.post(f"/bootstrap/frames/{frame_id}/annotate",
+                       json={"cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1})
+    assert resp.status_code == 200
+    assert resp.json()["review_status"] == "annotated"
+    assert label_path.exists()
+    content = label_path.read_text().strip()
+    assert content.startswith("0 ")
+    parts = content.split()
+    assert len(parts) == 5
+    assert float(parts[1]) == pytest.approx(0.5)
+
+
+def test_skip_writes_empty_label_and_sets_status(client, tmp_path):
+    _, video_id = _setup_video_with_rally(client)
+    img_path = tmp_path / "frame.jpg"
+    img_path.write_bytes(b"fake")
+    label_path = tmp_path / "label.txt"
+    with SessionLocal() as db:
+        frame = _make_frame(db, video_id, str(img_path), str(label_path))
+        frame_id = frame.id
+
+    resp = client.post(f"/bootstrap/frames/{frame_id}/skip")
+    assert resp.status_code == 200
+    assert resp.json()["review_status"] == "skipped"
+    assert label_path.exists()
+    assert label_path.read_text() == ""
+
+
+def test_bootstrap_status_counts_frames(client, tmp_path):
+    _, video_id = _setup_video_with_rally(client)
+    with SessionLocal() as db:
+        _make_frame(db, video_id, str(tmp_path / "a.jpg"), str(tmp_path / "a.txt"), FrameStatus.annotated)
+        _make_frame(db, video_id, str(tmp_path / "b.jpg"), str(tmp_path / "b.txt"), FrameStatus.pending)
+
+    resp = client.get("/bootstrap/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["annotated"] == 1
+    assert data["pending"] == 1
+    assert data["frames_total"] == 2
+    assert data["model_ready"] is False
+    assert data["active_model_id"] is None
+
+
+def test_admin_reconcile_returns_summary(client, tmp_path):
+    _, video_id = _setup_video_with_rally(client)
+    img_path = tmp_path / "frame.jpg"
+    img_path.write_bytes(b"fake")
+    label_path = tmp_path / "label.txt"
+    label_path.write_text("0 0.5 0.5 0.1 0.1\n")
+    with SessionLocal() as db:
+        _make_frame(db, video_id, str(img_path), str(label_path), FrameStatus.pending)
+
+    resp = client.post("/admin/reconcile")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "restored" in data
+    assert data["restored"] >= 1

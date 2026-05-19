@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.config import DATABASE_URL
@@ -91,3 +92,59 @@ def get_frame_image(frame_id: int, db: Session = Depends(get_db)):
     if not Path(frame.img_path).exists():
         raise HTTPException(status_code=404, detail="image file not found on disk")
     return FileResponse(frame.img_path, media_type="image/jpeg")
+
+
+@router.post("/bootstrap/frames/{frame_id}/annotate", response_model=LabeledFrameRead)
+def annotate_frame(frame_id: int, body: AnnotateRequest, db: Session = Depends(get_db)):
+    frame = db.get(LabeledFrame, frame_id)
+    if not frame:
+        raise HTTPException(status_code=404, detail="frame not found")
+    label_path = Path(frame.label_path)
+    label_path.parent.mkdir(parents=True, exist_ok=True)
+    label_path.write_text(f"0 {body.cx:.6f} {body.cy:.6f} {body.w:.6f} {body.h:.6f}\n")
+    frame.review_status = FrameStatus.annotated
+    db.commit()
+    db.refresh(frame)
+    return frame
+
+
+@router.post("/bootstrap/frames/{frame_id}/skip", response_model=LabeledFrameRead)
+def skip_frame(frame_id: int, db: Session = Depends(get_db)):
+    frame = db.get(LabeledFrame, frame_id)
+    if not frame:
+        raise HTTPException(status_code=404, detail="frame not found")
+    label_path = Path(frame.label_path)
+    label_path.parent.mkdir(parents=True, exist_ok=True)
+    label_path.write_text("")
+    frame.review_status = FrameStatus.skipped
+    db.commit()
+    db.refresh(frame)
+    return frame
+
+
+@router.get("/bootstrap/status", response_model=BootstrapStatus)
+def bootstrap_status(db: Session = Depends(get_db)):
+    counts = dict(
+        db.query(LabeledFrame.review_status, func.count(LabeledFrame.id))
+        .group_by(LabeledFrame.review_status)
+        .all()
+    )
+    annotated = counts.get(FrameStatus.annotated, 0)
+    skipped = counts.get(FrameStatus.skipped, 0)
+    pending = counts.get(FrameStatus.pending, 0)
+    missing = counts.get(FrameStatus.missing, 0)
+    active = db.query(ModelVersion).filter_by(is_active=True).first()
+    return BootstrapStatus(
+        frames_total=annotated + skipped + pending + missing,
+        annotated=annotated,
+        skipped=skipped,
+        pending=pending,
+        missing=missing,
+        model_ready=annotated >= MIN_FRAMES,
+        active_model_id=active.id if active else None,
+    )
+
+
+@router.post("/admin/reconcile", response_model=ReconcileResult)
+def run_reconcile(db: Session = Depends(get_db)):
+    return reconcile(db)
