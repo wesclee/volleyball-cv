@@ -1,5 +1,7 @@
 // frontend/src/api/client.ts
-import type { Job, Match, MatchCreate, ProcessedVideo, Rally, RallyUpdate, Video } from '../types'
+import type {
+  AnnotateBbox, BootstrapStatus, Job, LabeledFrame, Match, MatchCreate, ModelVersion, ProcessedVideo, Rally, RallyUpdate, ReconcileResult, TrainingRun, Video,
+} from '../types'
 
 const BASE = 'http://localhost:8000'
 
@@ -61,4 +63,64 @@ export function patchRally(rallyId: number, data: RallyUpdate): Promise<Rally> {
 
 export function exportMatch(matchId: number): Promise<ProcessedVideo[]> {
   return request(`/matches/${matchId}/export`, { method: 'POST' })
+}
+
+export function getBootstrapStatus(): Promise<BootstrapStatus> {
+  return request('/bootstrap/status')
+}
+
+export function startExtraction(
+  videoId: number,
+  opts: { sample_rate?: number; max_frames?: number; split_train?: number; split_val?: number; split_test?: number } = {}
+): Promise<{ video_id: number }> {
+  return request(`/bootstrap/extract/${videoId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  })
+}
+
+export function getFrames(params: { status?: string; split?: string } = {}): Promise<LabeledFrame[]> {
+  const qs = new URLSearchParams(params as Record<string, string>).toString()
+  return request(`/bootstrap/frames${qs ? '?' + qs : ''}`)
+}
+
+export function getFrameImageUrl(frameId: number): string {
+  return `http://localhost:8000/bootstrap/frames/${frameId}/image`
+}
+
+export function annotateFrame(frameId: number, bbox: AnnotateBbox): Promise<LabeledFrame> {
+  return request(`/bootstrap/frames/${frameId}/annotate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bbox),
+  })
+}
+
+export function skipFrame(frameId: number): Promise<LabeledFrame> {
+  return request(`/bootstrap/frames/${frameId}/skip`, { method: 'POST' })
+}
+
+export function startTraining(epochs = 50): Promise<{ run_id: number }> {
+  return request('/training/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ epochs }),
+  })
+}
+
+export function getTrainingRun(runId: number): Promise<TrainingRun> {
+  return request(`/training/runs/${runId}`)
+}
+
+export function getModels(): Promise<ModelVersion[]> {
+  return request('/models')
+}
+
+export function promoteModel(modelId: number): Promise<ModelVersion> {
+  return request(`/models/${modelId}/promote`, { method: 'POST' })
+}
+
+export function runReconcile(): Promise<ReconcileResult> {
+  return request('/admin/reconcile', { method: 'POST' })
 }
