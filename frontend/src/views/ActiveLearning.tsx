@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AnnotateBbox, BootstrapStatus, LabeledFrame } from '../types'
+import type { AnnotateBbox, BootstrapStatus, LabeledFrame, ModelVersion, TrainingRun } from '../types'
 import {
   annotateFrame, getBootstrapStatus, getFrameImageUrl, getFrames,
-  skipFrame, startTraining,
+  getModels, getTrainingRun, promoteModel, skipFrame, startTraining,
 } from '../api/client'
 
 interface Rect { x: number; y: number; w: number; h: number }
@@ -202,14 +202,167 @@ export default function ActiveLearning() {
   )
 }
 
-function TrainingPhase({ runId, onBack }: { runId: number; onBack: () => void }) {
+export function PromotionPanel({
+  runId,
+  oldModel,
+  newModel,
+  onPromoted,
+}: {
+  runId: number
+  oldModel: ModelVersion | null
+  newModel: ModelVersion
+  onPromoted: () => void
+}) {
+  const [promoting, setPromoting] = useState(false)
+  const [promoted, setPromoted] = useState(false)
+
+  const netDelta = oldModel
+    ? (newModel.test_precision ?? 0) - (oldModel.test_precision ?? 0)
+    + (newModel.test_recall ?? 0) - (oldModel.test_recall ?? 0)
+    + (newModel.test_map50 ?? 0) - (oldModel.test_map50 ?? 0)
+    : 1
+
+  const canPromote = netDelta > 0
+
+  const handlePromote = async () => {
+    setPromoting(true)
+    await promoteModel(newModel.id)
+    setPromoted(true)
+    setPromoting(false)
+    onPromoted()
+  }
+
+  const fmt = (v: number | null) => v != null ? v.toFixed(3) : '—'
+  const diff = (n: number | null, o: number | null) => {
+    if (n == null || o == null) return ''
+    const d = n - o
+    return d >= 0 ? `+${d.toFixed(3)}` : d.toFixed(3)
+  }
+
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Training</h1>
-      <p className="text-gray-500">Training run #{runId} started. See Phase B for progress.</p>
-      <button onClick={onBack} className="mt-4 px-4 py-2 bg-gray-600 text-white rounded">
-        Back
-      </button>
+    <div className="space-y-4">
+      <h2 className="text-xl font-semibold">Test Set Evaluation</h2>
+      <table className="border-collapse text-sm w-full max-w-lg">
+        <thead>
+          <tr className="bg-gray-100">
+            <th className="border p-2 text-left">Metric</th>
+            {oldModel && <th className="border p-2">Old model</th>}
+            <th className="border p-2">New model</th>
+            {oldModel && <th className="border p-2">Change</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {(['test_precision', 'test_recall', 'test_map50'] as const).map(key => (
+            <tr key={key}>
+              <td className="border p-2 font-mono">{key.replace('test_', '')}</td>
+              {oldModel && <td className="border p-2 text-center">{fmt(oldModel[key])}</td>}
+              <td className="border p-2 text-center">{fmt(newModel[key])}</td>
+              {oldModel && (
+                <td className={`border p-2 text-center ${
+                  (newModel[key] ?? 0) >= (oldModel[key] ?? 0) ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {diff(newModel[key], oldModel[key])}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {oldModel && (
+        <p className={`font-mono text-sm ${canPromote ? 'text-green-700' : 'text-red-700'}`}>
+          Net delta: {netDelta >= 0 ? '+' : ''}{netDelta.toFixed(4)} —{' '}
+          {canPromote ? 'Model improved overall' : 'Model did not improve overall'}
+        </p>
+      )}
+
+      {promoted ? (
+        <p className="text-green-700 font-semibold">Model promoted successfully.</p>
+      ) : (
+        <div className="flex gap-2">
+          <button
+            onClick={handlePromote}
+            disabled={!canPromote || promoting}
+            className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-40"
+          >
+            Promote
+          </button>
+          <button
+            onClick={onPromoted}
+            className="px-4 py-2 bg-gray-400 text-white rounded"
+          >
+            Discard
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TrainingPhase({ runId, onBack }: { runId: number; onBack: () => void }) {
+  const [run, setRun] = useState<TrainingRun | null>(null)
+  const [models, setModels] = useState<ModelVersion[]>([])
+
+  useEffect(() => {
+    if (!run || run.status === 'running' || run.status === 'pending') {
+      const id = setInterval(async () => {
+        const r = await getTrainingRun(runId)
+        setRun(r)
+        if (r.status === 'done' || r.status === 'error') {
+          clearInterval(id)
+          const ms = await getModels()
+          setModels(ms)
+        }
+      }, 3000)
+      // Fire immediately
+      getTrainingRun(runId).then(r => {
+        setRun(r)
+        if (r.status === 'done' || r.status === 'error') {
+          getModels().then(setModels)
+        }
+      })
+      return () => clearInterval(id)
+    }
+  }, [runId])
+
+  const newModel = run?.new_model_id ? models.find(m => m.id === run.new_model_id) : undefined
+  const oldModel = models.find(m => m.is_active && m.id !== run?.new_model_id) ?? null
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto space-y-4">
+      <h1 className="text-2xl font-bold">Training Run #{runId}</h1>
+
+      {!run && <p className="text-gray-500">Loading…</p>}
+
+      {run && run.status !== 'done' && run.status !== 'error' && (
+        <div>
+          <p className="text-gray-700">Status: <span className="font-mono">{run.status}</span></p>
+          <p className="text-gray-500 text-sm">Training in progress — checking every 3s…</p>
+        </div>
+      )}
+
+      {run?.status === 'error' && (
+        <div className="text-red-600">
+          <p className="font-semibold">Training failed</p>
+          <pre className="text-xs bg-red-50 p-2 rounded overflow-auto">{run.error}</pre>
+          <button onClick={onBack} className="mt-2 px-4 py-2 bg-gray-600 text-white rounded">
+            Back
+          </button>
+        </div>
+      )}
+
+      {run?.status === 'done' && newModel && (
+        <PromotionPanel
+          runId={runId}
+          oldModel={oldModel}
+          newModel={newModel}
+          onPromoted={onBack}
+        />
+      )}
+
+      {run?.status === 'done' && !newModel && (
+        <p className="text-gray-500">Training complete — model version not found.</p>
+      )}
     </div>
   )
 }
