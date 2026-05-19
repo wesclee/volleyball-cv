@@ -56,7 +56,43 @@ describe('UploadProcess', () => {
     const button = screen.getAllByRole('button', { name: /upload/i })[0]
     await user.click(button)
 
-    await waitFor(() => expect(api.uploadVideo).toHaveBeenCalledWith(1, 1, file))
+    await waitFor(() => expect(api.uploadVideo).toHaveBeenCalledWith(1, 1, file, expect.any(Function)))
     await waitFor(() => expect(api.processVideo).toHaveBeenCalledWith(10))
+  })
+
+  it('shows upload progress bar with percentage during upload', async () => {
+    let resolveUpload!: (v: typeof VIDEO) => void
+    vi.mocked(api.uploadVideo).mockImplementation((_mid, _sn, _file, onProgress) => {
+      onProgress?.(60)
+      return new Promise(res => { resolveUpload = res })
+    })
+
+    const user = userEvent.setup()
+    renderWithRoute()
+    await screen.findByText(/2026-05-18/)
+
+    const file = new File(['video'], 'set1.mp4', { type: 'video/mp4' })
+    await user.upload(screen.getAllByLabelText(/set [123]/i)[0], file)
+    await user.click(screen.getAllByRole('button', { name: /upload/i })[0])
+
+    await waitFor(() => {
+      expect(screen.getByText(/Uploading… 60%/i)).toBeInTheDocument()
+    })
+
+    resolveUpload(VIDEO)
+  })
+
+  it('shows processing bar after upload completes', async () => {
+    const user = userEvent.setup()
+    renderWithRoute()
+    await screen.findByText(/2026-05-18/)
+
+    const file = new File(['video'], 'set1.mp4', { type: 'video/mp4' })
+    await user.upload(screen.getAllByLabelText(/set [123]/i)[0], file)
+    await user.click(screen.getAllByRole('button', { name: /upload/i })[0])
+
+    await waitFor(() => {
+      expect(screen.getByText(/Processing…/i)).toBeInTheDocument()
+    })
   })
 })

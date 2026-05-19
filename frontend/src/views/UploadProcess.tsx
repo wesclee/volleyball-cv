@@ -40,7 +40,13 @@ export default function UploadProcess() {
     setSetField(setNumber, 'status', 'uploading')
     setSetField(setNumber, 'error', null)
     try {
-      const video = await uploadVideo(Number(matchId), setNumber, s.file)
+      const video = await uploadVideo(
+        Number(matchId),
+        setNumber,
+        s.file,
+        pct => setSetField(setNumber, 'progress', pct),
+      )
+      setSetField(setNumber, 'progress', 0)
       setSetField(setNumber, 'status', 'processing')
       const job = await processVideo(video.id)
       const poll = setInterval(async () => {
@@ -97,10 +103,7 @@ export default function UploadProcess() {
               </button>
             </div>
 
-            {s.status === 'uploading' && (
-              <p className="mt-2 text-sm text-gray-500">Uploading…</p>
-            )}
-            {(s.status === 'processing' || s.status === 'done') && (
+            {(s.status === 'uploading' || s.status === 'processing' || s.status === 'done') && (
               <div className="mt-3">
                 <div className="h-2 bg-gray-200 rounded overflow-hidden">
                   <div
@@ -109,7 +112,11 @@ export default function UploadProcess() {
                   />
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  {s.status === 'done' ? '✓ Done' : `Processing… ${Math.round(s.progress)}%`}
+                  {s.status === 'done'
+                    ? '✓ Done'
+                    : s.status === 'uploading'
+                    ? `Uploading… ${Math.round(s.progress)}%`
+                    : `Processing… ${Math.round(s.progress)}%`}
                 </p>
               </div>
             )}
