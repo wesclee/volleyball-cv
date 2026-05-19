@@ -1,4 +1,5 @@
 # backend/training/trainer.py
+import os
 import shutil
 import time
 import traceback
@@ -85,7 +86,7 @@ def _do_train(run: TrainingRun, epochs: int, db) -> None:
         data=str(yaml_path),
         epochs=epochs,
         imgsz=640,
-        device=0,
+        device=os.getenv("YOLO_DEVICE", "0"),
         project=str(MODELS_DIR),
         name=f"run_{run.id}",
         exist_ok=True,

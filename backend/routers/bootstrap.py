@@ -1,4 +1,5 @@
 # backend/routers/bootstrap.py
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -30,7 +31,6 @@ MIN_FRAMES = 200
 
 def _extraction_task(video_id: int, sample_rate: int, max_frames: int,
                      split_ratios: dict, db_url: str) -> None:
-    import logging
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
@@ -157,7 +157,9 @@ def start_training_run(
             status_code=422,
             detail=f"need at least {MIN_FRAMES} annotated frames, have {annotated_count}",
         )
-    in_progress = db.query(TrainingRun).filter_by(status=TrainingStatus.running).first()
+    in_progress = db.query(TrainingRun).filter(
+        TrainingRun.status.in_([TrainingStatus.pending, TrainingStatus.running])
+    ).first()
     if in_progress:
         raise HTTPException(status_code=409, detail="a training run is already in progress")
     run = TrainingRun(status=TrainingStatus.pending, epochs=body.epochs)

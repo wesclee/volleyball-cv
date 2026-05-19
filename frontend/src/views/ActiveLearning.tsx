@@ -119,17 +119,26 @@ export default function ActiveLearning() {
     }
   }
 
+  const confirmRef = useRef(confirm)
+  const noBallRef = useRef(noBall)
+  const skipRef = useRef(skip)
+  useEffect(() => {
+    confirmRef.current = confirm
+    noBallRef.current = noBall
+    skipRef.current = skip
+  })
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (phase !== 'annotate') return
-      if (e.key === 'Enter') confirm()
-      if (e.key === 'n' || e.key === 'N') noBall()
-      if (e.key === 's' || e.key === 'S') skip()
+      if (e.key === 'Enter') confirmRef.current()
+      if (e.key === 'n' || e.key === 'N') noBallRef.current()
+      if (e.key === 's' || e.key === 'S') skipRef.current()
       if (e.key === 'r' || e.key === 'R') setRect(null)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  })
+  }, [phase])
 
   if (phase === 'training') {
     return <TrainingPhase runId={runId!} onBack={() => setPhase('annotate')} />

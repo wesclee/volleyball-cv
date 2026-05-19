@@ -12,7 +12,7 @@ _YOLO_LINE_RE = re.compile(r"^0 [\d.]+ [\d.]+ [\d.]+ [\d.]+\s*$")
 
 
 def reconcile(db: Session) -> dict[str, int]:
-    counts = {"missing": 0, "restored": 0, "reregistered": 0, "malformed": 0, "split_conflicts": 0, "ok": 0}
+    counts = {"missing": 0, "restored": 0, "reregistered": 0, "malformed": 0, "ok": 0}
 
     for frame in db.query(LabeledFrame).all():
         img_path = Path(frame.img_path)

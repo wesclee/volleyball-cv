@@ -1,7 +1,7 @@
 # backend/schemas/match.py
 from datetime import datetime
-from backend.models.match import JobStatus, VideoStatus
-from pydantic import BaseModel
+from backend.models.match import FrameSplit, FrameStatus, JobStatus, TrainingStatus, VideoStatus
+from pydantic import BaseModel, Field
 
 
 class MatchCreate(BaseModel):
@@ -73,9 +73,6 @@ class ProcessedVideoRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
-from backend.models.match import FrameSplit, FrameStatus, TrainingStatus  # noqa: E402
-
-
 class LabeledFrameRead(BaseModel):
     id: int
     video_id: int
@@ -128,10 +125,10 @@ class BootstrapExtractRequest(BaseModel):
 
 
 class AnnotateRequest(BaseModel):
-    cx: float
-    cy: float
-    w: float
-    h: float
+    cx: float = Field(ge=0.0, le=1.0)
+    cy: float = Field(ge=0.0, le=1.0)
+    w: float = Field(gt=0.0, le=1.0)
+    h: float = Field(gt=0.0, le=1.0)
 
 
 class TrainingRunRequest(BaseModel):
@@ -153,5 +150,4 @@ class ReconcileResult(BaseModel):
     restored: int
     reregistered: int
     malformed: int
-    split_conflicts: int
     ok: int
