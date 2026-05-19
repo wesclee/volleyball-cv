@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import ActiveLearning from '../views/ActiveLearning'
+import type { FrameSplit } from '../types'
 
 vi.mock('../api/client', () => ({
   getBootstrapStatus: vi.fn(),
@@ -23,10 +24,10 @@ const mockStatus = (overrides = {}) => ({
   model_ready: false, active_model_id: null, ...overrides,
 })
 
-const mockFrame = (overrides = {}) => ({
+const mockFrame = (overrides: Partial<Record<string, any>> = {}) => ({
   id: 1, video_id: 1, frame_number: 0, timestamp: 0.0,
   img_path: '/fake/frame.jpg', label_path: '/fake/label.txt',
-  split: 'train', review_status: 'pending', created_at: '2026-05-19T00:00:00',
+  split: 'train' as const satisfies FrameSplit, review_status: 'pending' as const, created_at: '2026-05-19T00:00:00',
   ...overrides,
 })
 

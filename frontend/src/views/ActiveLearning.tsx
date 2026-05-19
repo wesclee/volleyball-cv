@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AnnotateBbox, BootstrapStatus, LabeledFrame } from '../types'
 import {
   annotateFrame, getBootstrapStatus, getFrameImageUrl, getFrames,
-  skipFrame, startExtraction, startTraining,
+  skipFrame, startTraining,
 } from '../api/client'
 
 interface Rect { x: number; y: number; w: number; h: number }
