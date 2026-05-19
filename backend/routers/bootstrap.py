@@ -4,7 +4,6 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.config import DATABASE_URL
@@ -13,7 +12,6 @@ from backend.models.match import FrameStatus, FrameSplit, LabeledFrame, ModelVer
 from backend.schemas.match import (
     AnnotateRequest,
     BootstrapExtractRequest,
-    BootstrapStatus,
     LabeledFrameRead,
     ModelVersionRead,
     ReconcileResult,
@@ -116,28 +114,6 @@ def skip_frame(frame_id: int, db: Session = Depends(get_db)):
     db.refresh(frame)
     return frame
 
-
-@router.get("/bootstrap/status", response_model=BootstrapStatus)
-def bootstrap_status(db: Session = Depends(get_db)):
-    counts = dict(
-        db.query(LabeledFrame.review_status, func.count(LabeledFrame.id))
-        .group_by(LabeledFrame.review_status)
-        .all()
-    )
-    annotated = counts.get(FrameStatus.annotated, 0)
-    skipped = counts.get(FrameStatus.skipped, 0)
-    pending = counts.get(FrameStatus.pending, 0)
-    missing = counts.get(FrameStatus.missing, 0)
-    active = db.query(ModelVersion).filter_by(is_active=True).first()
-    return BootstrapStatus(
-        frames_total=annotated + skipped + pending + missing,
-        annotated=annotated,
-        skipped=skipped,
-        pending=pending,
-        missing=missing,
-        model_ready=annotated >= MIN_FRAMES,
-        active_model_id=active.id if active else None,
-    )
 
 
 @router.post("/admin/reconcile", response_model=ReconcileResult)

@@ -140,15 +140,6 @@ class TrainingRunRequest(BaseModel):
     epochs: int = 50
 
 
-class BootstrapStatus(BaseModel):
-    frames_total: int
-    annotated: int
-    skipped: int
-    pending: int
-    missing: int
-    model_ready: bool
-    active_model_id: int | None
-
 
 class ReconcileResult(BaseModel):
     missing: int

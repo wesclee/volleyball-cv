@@ -126,21 +126,6 @@ def test_skip_writes_empty_label_and_sets_status(client, tmp_path):
     assert label_path.read_text() == ""
 
 
-def test_bootstrap_status_counts_frames(client, tmp_path):
-    _, video_id = _setup_video_with_rally(client)
-    with SessionLocal() as db:
-        _make_frame(db, video_id, str(tmp_path / "a.jpg"), str(tmp_path / "a.txt"), FrameStatus.annotated)
-        _make_frame(db, video_id, str(tmp_path / "b.jpg"), str(tmp_path / "b.txt"), FrameStatus.pending)
-
-    resp = client.get("/bootstrap/status")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["annotated"] == 1
-    assert data["pending"] == 1
-    assert data["frames_total"] == 2
-    assert data["model_ready"] is False
-    assert data["active_model_id"] is None
-
 
 def test_admin_reconcile_returns_summary(client, tmp_path):
     _, video_id = _setup_video_with_rally(client)

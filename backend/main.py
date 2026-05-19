@@ -9,6 +9,7 @@ import backend.models  # noqa — registers all ORM models with Base
 from backend.config import EXPORTS_DIR, FRAMES_DIR, UPLOADS_DIR
 from backend.database import Base, engine
 from backend.routers import matches, videos, jobs, rallies, bootstrap
+from backend.routers.labeling import router as labeling_router
 
 
 @asynccontextmanager
@@ -36,3 +37,4 @@ app.include_router(videos.router)
 app.include_router(jobs.router)
 app.include_router(rallies.router)
 app.include_router(bootstrap.router)
+app.include_router(labeling_router)
