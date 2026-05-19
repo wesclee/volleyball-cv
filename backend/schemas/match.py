@@ -71,3 +71,87 @@ class ProcessedVideoRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+from backend.models.match import FrameSplit, FrameStatus, TrainingStatus  # noqa: E402
+
+
+class LabeledFrameRead(BaseModel):
+    id: int
+    video_id: int
+    frame_number: int
+    timestamp: float
+    img_path: str
+    label_path: str
+    split: FrameSplit
+    review_status: FrameStatus
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ModelVersionRead(BaseModel):
+    id: int
+    name: str
+    weights_path: str
+    dataset_size: int
+    test_precision: float | None
+    test_recall: float | None
+    test_map50: float | None
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TrainingRunRead(BaseModel):
+    id: int
+    status: TrainingStatus
+    base_model_id: int | None
+    new_model_id: int | None
+    frames_used: int | None
+    epochs: int | None
+    final_loss: float | None
+    duration_s: float | None
+    error: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BootstrapExtractRequest(BaseModel):
+    sample_rate: int = 30
+    max_frames: int = 500
+    split_train: float = 0.8
+    split_val: float = 0.1
+    split_test: float = 0.1
+
+
+class AnnotateRequest(BaseModel):
+    cx: float
+    cy: float
+    w: float
+    h: float
+
+
+class TrainingRunRequest(BaseModel):
+    epochs: int = 50
+
+
+class BootstrapStatus(BaseModel):
+    frames_total: int
+    annotated: int
+    skipped: int
+    pending: int
+    missing: int
+    model_ready: bool
+    active_model_id: int | None
+
+
+class ReconcileResult(BaseModel):
+    missing: int
+    restored: int
+    reregistered: int
+    malformed: int
+    split_conflicts: int
+    ok: int

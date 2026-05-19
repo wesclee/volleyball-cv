@@ -22,6 +22,26 @@ class JobStatus(str, enum.Enum):
     error = "error"
 
 
+class FrameSplit(str, enum.Enum):
+    train = "train"
+    val = "val"
+    test = "test"
+
+
+class FrameStatus(str, enum.Enum):
+    pending = "pending"
+    annotated = "annotated"
+    skipped = "skipped"
+    missing = "missing"
+
+
+class TrainingStatus(str, enum.Enum):
+    pending = "pending"
+    running = "running"
+    done = "done"
+    error = "error"
+
+
 class Match(Base):
     __tablename__ = "matches"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -46,6 +66,7 @@ class Video(Base):
     match: Mapped["Match"] = relationship(back_populates="videos")
     rallies: Mapped[list["Rally"]] = relationship(back_populates="video", cascade="all, delete-orphan")
     jobs: Mapped[list["Job"]] = relationship(back_populates="video", cascade="all, delete-orphan")
+    labeled_frames: Mapped[list["LabeledFrame"]] = relationship(back_populates="video", cascade="all, delete-orphan")
 
 
 class Job(Base):
@@ -78,3 +99,44 @@ class ProcessedVideo(Base):
     output_path: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     match: Mapped["Match"] = relationship(back_populates="processed_videos")
+
+
+class LabeledFrame(Base):
+    __tablename__ = "labeled_frames"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    video_id: Mapped[int] = mapped_column(ForeignKey("videos.id"))
+    frame_number: Mapped[int] = mapped_column(Integer)
+    timestamp: Mapped[float] = mapped_column(Float)
+    img_path: Mapped[str] = mapped_column(String(500))
+    label_path: Mapped[str] = mapped_column(String(500))
+    split: Mapped[FrameSplit] = mapped_column(SAEnum(FrameSplit))
+    review_status: Mapped[FrameStatus] = mapped_column(SAEnum(FrameStatus), default=FrameStatus.pending)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    video: Mapped["Video"] = relationship(back_populates="labeled_frames")
+
+
+class ModelVersion(Base):
+    __tablename__ = "model_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    weights_path: Mapped[str] = mapped_column(String(500))
+    dataset_size: Mapped[int] = mapped_column(Integer)
+    test_precision: Mapped[float | None] = mapped_column(Float)
+    test_recall: Mapped[float | None] = mapped_column(Float)
+    test_map50: Mapped[float | None] = mapped_column(Float)
+    is_active: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TrainingRun(Base):
+    __tablename__ = "training_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[TrainingStatus] = mapped_column(SAEnum(TrainingStatus), default=TrainingStatus.pending)
+    base_model_id: Mapped[int | None] = mapped_column(ForeignKey("model_versions.id"), nullable=True)
+    new_model_id: Mapped[int | None] = mapped_column(ForeignKey("model_versions.id"), nullable=True)
+    frames_used: Mapped[int | None] = mapped_column(Integer)
+    epochs: Mapped[int | None] = mapped_column(Integer)
+    final_loss: Mapped[float | None] = mapped_column(Float)
+    duration_s: Mapped[float | None] = mapped_column(Float)
+    error: Mapped[str | None] = mapped_column(String(2000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

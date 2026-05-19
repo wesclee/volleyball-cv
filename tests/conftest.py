@@ -31,3 +31,18 @@ def client(clean_db):
     from backend.main import app
     with TestClient(app) as c:
         yield c
+
+
+import shutil  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def clean_data_dirs():
+    yield
+    data_dir = Path("/tmp/volleyball_cv_test_data")
+    if data_dir.exists():
+        shutil.rmtree(data_dir, ignore_errors=True)
+    # Recreate expected subdirs so subsequent tests that import config.py (already
+    # cached in sys.modules) still find the directories they need.
+    for subdir in ("uploads", "exports", "frames", "dataset", "models"):
+        (data_dir / subdir).mkdir(parents=True, exist_ok=True)
