@@ -21,12 +21,7 @@ from backend.schemas.match import (
 )
 from backend.training.frame_extractor import extract_frames
 from backend.training.reconciler import reconcile
-
-# from backend.training.trainer import run_training  # added in Task 8
-
-
-def run_training(*args, **kwargs):
-    raise NotImplementedError("trainer not yet implemented")
+from backend.training.trainer import run_training
 
 
 router = APIRouter()
