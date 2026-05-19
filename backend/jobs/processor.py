@@ -6,9 +6,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.cv.motion_detector import MotionDetector
+from backend.cv.yolo_detector import YoloDetector
 from backend.cv.detector import RallySegment
 from backend.editor.ffmpeg_editor import cut_and_join
-from backend.models.match import Job, JobStatus, ProcessedVideo, Rally, Video, VideoStatus
+from backend.models.match import Job, JobStatus, ModelVersion, ProcessedVideo, Rally, Video, VideoStatus
 
 
 def process_video(job_id: int, db_url: str) -> None:
@@ -51,7 +52,8 @@ def process_video(job_id: int, db_url: str) -> None:
 
 
 def _run_pipeline(video: Video, job: Job, db: Session) -> None:
-    detector = MotionDetector()
+    active_model = db.query(ModelVersion).filter_by(is_active=True).first()
+    detector = YoloDetector(active_model.weights_path) if active_model else MotionDetector()
 
     job.progress_pct = 10.0
     db.commit()
@@ -61,7 +63,6 @@ def _run_pipeline(video: Video, job: Job, db: Session) -> None:
     job.progress_pct = 60.0
     db.commit()
 
-    # Persist detected rallies
     for seg in segments:
         db.add(Rally(
             video_id=video.id,
@@ -74,7 +75,6 @@ def _run_pipeline(video: Video, job: Job, db: Session) -> None:
     job.progress_pct = 70.0
     db.commit()
 
-    # Edit video
     output_filename = f"processed_match{video.match_id}_set{video.set_number}_vid{video.id}.mp4"
     output_path = cut_and_join(video.raw_path, segments, output_filename)
 
