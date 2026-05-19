@@ -150,6 +150,8 @@ class ReconcileResult(BaseModel):
 
 
 class LabelingStatus(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     frames_total: int
     annotated: int
     skipped: int

@@ -1,9 +1,9 @@
 // frontend/src/views/LabelingQueue.tsx
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AnnotateBbox, LabeledFrame, LabelingStatus, ModelVersion, TrainingRun } from '../types'
+import type { AnnotateBbox, LabeledFrame, LabelingStatus, ModelVersion, TrainingRun, Video } from '../types'
 import {
-  annotateFrame, getLabelingStatus, getLabelingQueue, getFrames,
-  getFrameImageUrl, getModels, getTrainingRun, promoteModel, skipFrame, startTraining,
+  annotateFrame, getAllVideos, getLabelingStatus, getLabelingQueue, getFrames,
+  getFrameImageUrl, getModels, getTrainingRun, promoteModel, skipFrame, startExtraction, startTraining,
 } from '../api/client'
 
 interface Rect { x: number; y: number; w: number; h: number }
@@ -19,6 +19,8 @@ export default function LabelingQueue() {
   const [phase, setPhase] = useState<'annotate' | 'training'>('annotate')
   const [runId, setRunId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [processedVideos, setProcessedVideos] = useState<Video[]>([])
+  const [extracting, setExtracting] = useState<number | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
 
@@ -27,14 +29,16 @@ export default function LabelingQueue() {
   const currentFrame: LabeledFrame | undefined = frames[idx]
 
   const refresh = useCallback(async () => {
-    const [s, allPending, queue] = await Promise.all([
+    const [s, allPending, queue, videos] = await Promise.all([
       getLabelingStatus(),
       getFrames({ status: 'pending' }),
       getLabelingQueue(),
+      getAllVideos('done'),
     ])
     setStatus(s)
     setBootstrapFrames(allPending.filter(f => f.pred_conf === null))
     setQueueFrames(queue)
+    setProcessedVideos(videos)
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
@@ -130,6 +134,18 @@ export default function LabelingQueue() {
     setIdx(i => i + 1)
   }
 
+  const handleExtract = async (videoId: number) => {
+    setExtracting(videoId)
+    try {
+      await startExtraction(videoId)
+      await refresh()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Extraction failed')
+    } finally {
+      setExtracting(null)
+    }
+  }
+
   const handleRetrain = async () => {
     try {
       const { run_id } = await startTraining(50)
@@ -187,6 +203,26 @@ export default function LabelingQueue() {
           >
             Start Training
           </button>
+        </div>
+      )}
+
+      {isBootstrapMode && processedVideos.length > 0 && (
+        <div className="mb-4 p-3 rounded bg-gray-50 border border-gray-200">
+          <p className="text-sm font-semibold mb-2">Extract frames from processed videos</p>
+          <div className="flex flex-col gap-2">
+            {processedVideos.map(v => (
+              <div key={v.id} className="flex items-center gap-3">
+                <span className="text-sm font-mono">Video {v.id} — match {v.match_id} set {v.set_number}</span>
+                <button
+                  onClick={() => handleExtract(v.id)}
+                  disabled={extracting === v.id}
+                  className="px-3 py-1 bg-blue-600 text-white text-sm rounded disabled:opacity-40"
+                >
+                  {extracting === v.id ? 'Extracting…' : 'Extract Frames'}
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

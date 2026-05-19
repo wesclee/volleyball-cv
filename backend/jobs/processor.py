@@ -1,6 +1,9 @@
 # backend/jobs/processor.py
+import logging
 import traceback
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 import cv2
 from sqlalchemy import create_engine
@@ -38,6 +41,7 @@ def process_video(job_id: int, db_url: str) -> None:
                 db.commit()
                 return
 
+            log.info("job %d started — video %d (match %d set %d)", job_id, video.id, video.match_id, video.set_number)
             job.status = JobStatus.running
             db.commit()
 
@@ -46,9 +50,12 @@ def process_video(job_id: int, db_url: str) -> None:
                 job.status = JobStatus.done
                 job.progress_pct = 100.0
                 video.status = VideoStatus.done
+                log.info("job %d done", job_id)
             except Exception:
+                tb = traceback.format_exc()
+                log.error("job %d failed:\n%s", job_id, tb)
                 job.status = JobStatus.error
-                job.error = traceback.format_exc()[:2000]
+                job.error = tb[:2000]
                 video.status = VideoStatus.error
 
             db.commit()
@@ -122,19 +129,23 @@ def _run_pipeline(video: Video, job: Job, db: Session) -> None:
     active_model = db.query(ModelVersion).filter_by(is_active=True).first()
 
     if active_model:
+        log.info("job %d using YoloDetector (model %d)", job.id, active_model.id)
         detector = YoloDetector(active_model.weights_path)
     else:
+        log.info("job %d using MotionDetector (no trained model)", job.id)
         detector = MotionDetector()
 
     job.progress_pct = 10.0
     db.commit()
 
+    log.info("job %d detection started — %s", job.id, video.raw_path)
     if isinstance(detector, YoloDetector):
         segments, scores = detector.detect_with_scores(video.raw_path)
     else:
         segments = detector.detect(video.raw_path)
         scores = []
 
+    log.info("job %d detection complete — %d rallies found", job.id, len(segments))
     job.progress_pct = 60.0
     db.commit()
 
@@ -150,15 +161,19 @@ def _run_pipeline(video: Video, job: Job, db: Session) -> None:
     job.progress_pct = 70.0
     db.commit()
 
+    log.info("job %d export started", job.id)
     output_filename = f"processed_match{video.match_id}_set{video.set_number}_vid{video.id}.mp4"
     output_path = cut_and_join(video.raw_path, segments, output_filename)
     db.add(ProcessedVideo(match_id=video.match_id, output_path=output_path))
+    log.info("job %d export complete — %s", job.id, output_path)
 
     job.progress_pct = 90.0
     db.commit()
 
     if scores and isinstance(detector, YoloDetector):
+        log.info("job %d queuing uncertain frames", job.id)
         _queue_uncertain_frames(video, scores, detector, db)
+        log.info("job %d frame queuing complete", job.id)
 
     job.progress_pct = 95.0
     db.commit()

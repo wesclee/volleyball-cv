@@ -34,6 +34,10 @@ export function getMatchVideos(matchId: number): Promise<Video[]> {
   return request(`/matches/${matchId}/videos`)
 }
 
+export function getAllVideos(status?: string): Promise<Video[]> {
+  return request(`/matches/videos${status ? `?status=${status}` : ''}`)
+}
+
 export function uploadVideo(
   matchId: number,
   setNumber: number,
