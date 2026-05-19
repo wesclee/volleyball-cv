@@ -1,5 +1,5 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
-import ActiveLearning from './views/ActiveLearning'
+import LabelingQueue from './views/LabelingQueue'
 import ExportUpload from './views/ExportUpload'
 import MatchManager from './views/MatchManager'
 import RallyReview from './views/RallyReview'
@@ -34,7 +34,7 @@ export default function App() {
             <Route path="/matches/:matchId/upload" element={<UploadProcess />} />
             <Route path="/matches/:matchId/rally-review" element={<RallyReview />} />
             <Route path="/matches/:matchId/export" element={<ExportUpload />} />
-            <Route path="/active-learning" element={<ActiveLearning />} />
+            <Route path="/active-learning" element={<LabelingQueue />} />
           </Routes>
         </main>
       </div>

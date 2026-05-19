@@ -1,15 +1,17 @@
+// frontend/src/views/LabelingQueue.tsx
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AnnotateBbox, BootstrapStatus, LabeledFrame, ModelVersion, TrainingRun } from '../types'
+import type { AnnotateBbox, LabeledFrame, LabelingStatus, ModelVersion, TrainingRun } from '../types'
 import {
-  annotateFrame, getBootstrapStatus, getFrameImageUrl, getFrames,
-  getModels, getTrainingRun, promoteModel, skipFrame, startTraining,
+  annotateFrame, getLabelingStatus, getLabelingQueue, getFrames,
+  getFrameImageUrl, getModels, getTrainingRun, promoteModel, skipFrame, startTraining,
 } from '../api/client'
 
 interface Rect { x: number; y: number; w: number; h: number }
 
-export default function ActiveLearning() {
-  const [status, setStatus] = useState<BootstrapStatus | null>(null)
-  const [frames, setFrames] = useState<LabeledFrame[]>([])
+export default function LabelingQueue() {
+  const [status, setStatus] = useState<LabelingStatus | null>(null)
+  const [bootstrapFrames, setBootstrapFrames] = useState<LabeledFrame[]>([])
+  const [queueFrames, setQueueFrames] = useState<LabeledFrame[]>([])
   const [idx, setIdx] = useState(0)
   const [rect, setRect] = useState<Rect | null>(null)
   const [drawing, setDrawing] = useState(false)
@@ -20,18 +22,22 @@ export default function ActiveLearning() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
 
+  const isBootstrapMode = !status?.active_model_id
+  const frames = isBootstrapMode ? bootstrapFrames : queueFrames
+  const currentFrame: LabeledFrame | undefined = frames[idx]
+
   const refresh = useCallback(async () => {
-    const [s, f] = await Promise.all([
-      getBootstrapStatus(),
+    const [s, allPending, queue] = await Promise.all([
+      getLabelingStatus(),
       getFrames({ status: 'pending' }),
+      getLabelingQueue(),
     ])
     setStatus(s)
-    setFrames(f)
+    setBootstrapFrames(allPending.filter(f => f.pred_conf === null))
+    setQueueFrames(queue)
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
-
-  const currentFrame: LabeledFrame | undefined = frames[idx]
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -42,6 +48,15 @@ export default function ActiveLearning() {
       canvas.width = img.naturalWidth
       canvas.height = img.naturalHeight
       ctx.drawImage(img, 0, 0)
+      if (!rect && currentFrame.pred_cx != null) {
+        const px = (currentFrame.pred_cx - currentFrame.pred_w! / 2) * canvas.width
+        const py = (currentFrame.pred_cy! - currentFrame.pred_h! / 2) * canvas.height
+        const pw = currentFrame.pred_w! * canvas.width
+        const ph = currentFrame.pred_h! * canvas.height
+        ctx.strokeStyle = '#facc15'
+        ctx.lineWidth = 2
+        ctx.strokeRect(px, py, pw, ph)
+      }
       if (rect) {
         ctx.strokeStyle = '#00ff00'
         ctx.lineWidth = 2
@@ -51,14 +66,12 @@ export default function ActiveLearning() {
     img.src = getFrameImageUrl(currentFrame.id)
   }, [currentFrame, rect])
 
-  const canvasCoords = (e: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } => {
+  const canvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!
     const bounds = canvas.getBoundingClientRect()
-    const scaleX = canvas.width / bounds.width
-    const scaleY = canvas.height / bounds.height
     return {
-      x: (e.clientX - bounds.left) * scaleX,
-      y: (e.clientY - bounds.top) * scaleY,
+      x: (e.clientX - bounds.left) * (canvas.width / bounds.width),
+      y: (e.clientY - bounds.top) * (canvas.height / bounds.height),
     }
   }
 
@@ -67,28 +80,36 @@ export default function ActiveLearning() {
     setStartPt(canvasCoords(e))
     setRect(null)
   }
-
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!drawing || !startPt) return
     const pt = canvasCoords(e)
     setRect({
-      x: Math.min(startPt.x, pt.x),
-      y: Math.min(startPt.y, pt.y),
-      w: Math.abs(pt.x - startPt.x),
-      h: Math.abs(pt.y - startPt.y),
+      x: Math.min(startPt.x, pt.x), y: Math.min(startPt.y, pt.y),
+      w: Math.abs(pt.x - startPt.x), h: Math.abs(pt.y - startPt.y),
     })
   }
-
   const onMouseUp = () => setDrawing(false)
 
   const confirm = async () => {
-    if (!currentFrame || !rect) return
+    if (!currentFrame) return
     const canvas = canvasRef.current!
-    const bbox: AnnotateBbox = {
-      cx: (rect.x + rect.w / 2) / canvas.width,
-      cy: (rect.y + rect.h / 2) / canvas.height,
-      w: rect.w / canvas.width,
-      h: rect.h / canvas.height,
+    let bbox: AnnotateBbox
+    if (rect) {
+      bbox = {
+        cx: (rect.x + rect.w / 2) / canvas.width,
+        cy: (rect.y + rect.h / 2) / canvas.height,
+        w: rect.w / canvas.width,
+        h: rect.h / canvas.height,
+      }
+    } else if (currentFrame.pred_cx != null) {
+      bbox = {
+        cx: currentFrame.pred_cx,
+        cy: currentFrame.pred_cy!,
+        w: currentFrame.pred_w!,
+        h: currentFrame.pred_h!,
+      }
+    } else {
+      return
     }
     await annotateFrame(currentFrame.id, bbox)
     setRect(null)
@@ -109,7 +130,7 @@ export default function ActiveLearning() {
     setIdx(i => i + 1)
   }
 
-  const handleStartTraining = async () => {
+  const handleRetrain = async () => {
     try {
       const { run_id } = await startTraining(50)
       setRunId(run_id)
@@ -146,17 +167,21 @@ export default function ActiveLearning() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Active Learning — Bootstrap</h1>
+      <h1 className="text-2xl font-bold mb-4">Active Learning</h1>
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
 
-      {status && (
+      {status?.active_model_id && (
+        <RetrainPanel status={status} onRetrain={handleRetrain} />
+      )}
+
+      {status && isBootstrapMode && (
         <div className="flex items-center gap-4 mb-4">
           <span className="text-lg font-mono">
             {status.annotated} / {status.frames_total} frames annotated
           </span>
           <button
-            onClick={handleStartTraining}
+            onClick={handleRetrain}
             disabled={!status.model_ready}
             className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-40"
           >
@@ -168,8 +193,11 @@ export default function ActiveLearning() {
       {currentFrame ? (
         <div className="space-y-3">
           <p className="text-sm text-gray-500">
-            Frame {idx + 1} of {frames.length} — {currentFrame.split} split —
-            t={currentFrame.timestamp.toFixed(2)}s
+            Frame {idx + 1} of {frames.length}
+            {currentFrame.pred_conf != null && (
+              <> — conf <span className="font-mono">{currentFrame.pred_conf.toFixed(2)}</span></>
+            )}
+            {' '}— {currentFrame.split} split — t={currentFrame.timestamp.toFixed(2)}s
           </p>
           <div className="relative border border-gray-300 rounded overflow-hidden" style={{ maxWidth: 640 }}>
             <img ref={imgRef} alt="frame" className="hidden" />
@@ -184,7 +212,7 @@ export default function ActiveLearning() {
           <div className="flex gap-2">
             <button
               onClick={confirm}
-              disabled={!rect}
+              disabled={!rect && currentFrame.pred_cx == null}
               className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-40"
             >
               Confirm
@@ -204,9 +232,29 @@ export default function ActiveLearning() {
         <p className="text-gray-500">
           {status?.frames_total === 0
             ? 'No frames extracted yet. Use the Extract Frames button to sample from a processed video.'
-            : 'All pending frames reviewed.'}
+            : 'Queue empty — all pending frames reviewed.'}
         </p>
       )}
+    </div>
+  )
+}
+
+function RetrainPanel({ status, onRetrain }: { status: LabelingStatus; onRetrain: () => void }) {
+  const recommended = status.retrain_recommended
+  return (
+    <div className="flex items-center gap-4 mb-4 p-3 rounded bg-gray-50 border border-gray-200">
+      <span className="text-sm font-mono">
+        {status.new_labeled_since_last_train} / {status.retrain_threshold} new frames
+        {status.last_trained_at_size != null && (
+          <> · last trained at {status.last_trained_at_size}</>
+        )}
+      </span>
+      <button
+        onClick={onRetrain}
+        className={`px-4 py-2 rounded text-white ${recommended ? 'bg-green-600' : 'bg-gray-500'}`}
+      >
+        Retrain{recommended ? ' ↑' : ''}
+      </button>
     </div>
   )
 }
@@ -277,14 +325,12 @@ export function PromotionPanel({
           ))}
         </tbody>
       </table>
-
       {oldModel && (
         <p className={`font-mono text-sm ${canPromote ? 'text-green-700' : 'text-red-700'}`}>
           Net delta: {netDelta >= 0 ? '+' : ''}{netDelta.toFixed(4)} —{' '}
           {canPromote ? 'Model improved overall' : 'Model did not improve overall'}
         </p>
       )}
-
       {promoted ? (
         <p className="text-green-700 font-semibold">Model promoted successfully.</p>
       ) : (
@@ -296,10 +342,7 @@ export function PromotionPanel({
           >
             Promote
           </button>
-          <button
-            onClick={onPromoted}
-            className="px-4 py-2 bg-gray-400 text-white rounded"
-          >
+          <button onClick={onPromoted} className="px-4 py-2 bg-gray-400 text-white rounded">
             Discard
           </button>
         </div>
@@ -323,7 +366,6 @@ function TrainingPhase({ runId, onBack }: { runId: number; onBack: () => void })
           setModels(ms)
         }
       }, 3000)
-      // Fire immediately
       getTrainingRun(runId).then(r => {
         setRun(r)
         if (r.status === 'done' || r.status === 'error') {
@@ -340,16 +382,13 @@ function TrainingPhase({ runId, onBack }: { runId: number; onBack: () => void })
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-4">
       <h1 className="text-2xl font-bold">Training Run #{runId}</h1>
-
       {!run && <p className="text-gray-500">Loading…</p>}
-
       {run && run.status !== 'done' && run.status !== 'error' && (
         <div>
           <p className="text-gray-700">Status: <span className="font-mono">{run.status}</span></p>
           <p className="text-gray-500 text-sm">Training in progress — checking every 3s…</p>
         </div>
       )}
-
       {run?.status === 'error' && (
         <div className="text-red-600">
           <p className="font-semibold">Training failed</p>
@@ -359,16 +398,9 @@ function TrainingPhase({ runId, onBack }: { runId: number; onBack: () => void })
           </button>
         </div>
       )}
-
       {run?.status === 'done' && newModel && (
-        <PromotionPanel
-          runId={runId}
-          oldModel={oldModel}
-          newModel={newModel}
-          onPromoted={onBack}
-        />
+        <PromotionPanel runId={runId} oldModel={oldModel} newModel={newModel} onPromoted={onBack} />
       )}
-
       {run?.status === 'done' && !newModel && (
         <p className="text-gray-500">Training complete — model version not found.</p>
       )}
