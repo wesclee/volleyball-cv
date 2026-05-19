@@ -6,9 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import backend.models  # noqa — registers all ORM models with Base
-from backend.config import EXPORTS_DIR, UPLOADS_DIR
+from backend.config import EXPORTS_DIR, FRAMES_DIR, UPLOADS_DIR
 from backend.database import Base, engine
-from backend.routers import matches, videos, jobs, rallies
+from backend.routers import matches, videos, jobs, rallies, bootstrap
 
 
 @asynccontextmanager
@@ -29,8 +29,10 @@ app.add_middleware(
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 app.mount("/exports", StaticFiles(directory=str(EXPORTS_DIR)), name="exports")
+app.mount("/frames", StaticFiles(directory=str(FRAMES_DIR)), name="frames")
 
 app.include_router(matches.router)
 app.include_router(videos.router)
 app.include_router(jobs.router)
 app.include_router(rallies.router)
+app.include_router(bootstrap.router)
