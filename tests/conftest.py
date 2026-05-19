@@ -33,6 +33,16 @@ def client(clean_db):
         yield c
 
 
+@pytest.fixture
+def db_session(clean_db):
+    from backend.database import SessionLocal
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
 import shutil  # noqa: E402
 
 

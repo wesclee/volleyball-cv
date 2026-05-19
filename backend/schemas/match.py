@@ -82,6 +82,11 @@ class LabeledFrameRead(BaseModel):
     label_path: str
     split: FrameSplit
     review_status: FrameStatus
+    pred_cx: float | None
+    pred_cy: float | None
+    pred_w: float | None
+    pred_h: float | None
+    pred_conf: float | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -151,3 +156,17 @@ class ReconcileResult(BaseModel):
     reregistered: int
     malformed: int
     ok: int
+
+
+class LabelingStatus(BaseModel):
+    frames_total: int
+    annotated: int
+    skipped: int
+    pending: int
+    missing: int
+    model_ready: bool
+    active_model_id: int | None
+    new_labeled_since_last_train: int
+    retrain_recommended: bool
+    retrain_threshold: int
+    last_trained_at_size: int | None

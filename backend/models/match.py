@@ -111,6 +111,11 @@ class LabeledFrame(Base):
     label_path: Mapped[str] = mapped_column(String(500))
     split: Mapped[FrameSplit] = mapped_column(SAEnum(FrameSplit))
     review_status: Mapped[FrameStatus] = mapped_column(SAEnum(FrameStatus), default=FrameStatus.pending)
+    pred_cx: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pred_cy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pred_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pred_h: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pred_conf: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     video: Mapped["Video"] = relationship(back_populates="labeled_frames")
 

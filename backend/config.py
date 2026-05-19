@@ -14,3 +14,7 @@ EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 FRAMES_DIR.mkdir(parents=True, exist_ok=True)
 DATASET_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+ACTIVE_LOW_CONF = float(os.getenv("ACTIVE_LOW_CONF", "0.4"))
+ACTIVE_HIGH_CONF = float(os.getenv("ACTIVE_HIGH_CONF", "0.85"))
+RETRAIN_THRESHOLD = int(os.getenv("RETRAIN_THRESHOLD", "50"))

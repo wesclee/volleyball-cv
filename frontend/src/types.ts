@@ -72,6 +72,11 @@ export interface LabeledFrame {
   label_path: string
   split: FrameSplit
   review_status: FrameStatus
+  pred_cx: number | null
+  pred_cy: number | null
+  pred_w: number | null
+  pred_h: number | null
+  pred_conf: number | null
   created_at: string
 }
 
@@ -100,7 +105,7 @@ export interface TrainingRun {
   created_at: string
 }
 
-export interface BootstrapStatus {
+export interface LabelingStatus {
   frames_total: number
   annotated: number
   skipped: number
@@ -108,6 +113,10 @@ export interface BootstrapStatus {
   missing: number
   model_ready: boolean
   active_model_id: number | null
+  new_labeled_since_last_train: number
+  retrain_recommended: boolean
+  retrain_threshold: number
+  last_trained_at_size: number | null
 }
 
 export interface ReconcileResult {
@@ -115,7 +124,6 @@ export interface ReconcileResult {
   restored: number
   reregistered: number
   malformed: number
-  split_conflicts: number
   ok: number
 }
 
