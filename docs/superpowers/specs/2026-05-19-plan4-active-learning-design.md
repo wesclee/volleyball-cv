@@ -54,7 +54,7 @@ After `detect_with_scores()`:
 1. Collect all frame indices where `ACTIVE_LOW_CONF <= score <= ACTIVE_HIGH_CONF`
 2. No cap on count — all uncertain frames are queued
 3. Sort by confidence ascending (most uncertain first — highest training value per review)
-4. For each frame: extract JPEG to `FRAMES_DIR`, run single-frame `model.predict()` to get the bbox, write `LabeledFrame` with `pred_*` fields set and `review_status=pending`
+4. For each frame: extract JPEG to `FRAMES_DIR`, run single-frame `model.predict()` to get the bbox, write `LabeledFrame` with `pred_conf` set and `pred_cx/cy/w/h` set if a bbox was returned (if single-frame predict returns no detection, store bbox fields as `None` — the review UI shows a blank canvas for the user to draw on), `review_status=pending`
 5. Skip frames already in `labeled_frames` for this video (same double-extraction guard as the extractor)
 
 When the detector is `MotionDetector` (no model yet), this step is skipped entirely.
