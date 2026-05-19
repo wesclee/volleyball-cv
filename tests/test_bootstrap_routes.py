@@ -3,7 +3,7 @@ import io
 import pytest
 from pathlib import Path
 from backend.database import SessionLocal
-from backend.models.match import FrameStatus, FrameSplit, LabeledFrame, Match, Video, Rally
+from backend.models.match import FrameStatus, FrameSplit, LabeledFrame, Match, ModelVersion, Video, Rally
 
 
 def _setup_video_with_rally(client) -> tuple[int, int]:
@@ -156,3 +156,98 @@ def test_admin_reconcile_returns_summary(client, tmp_path):
     data = resp.json()
     assert "restored" in data
     assert data["restored"] >= 1
+
+
+def _make_model_version(db, precision, recall, map50, is_active=False) -> ModelVersion:
+    from backend.models.match import ModelVersion
+    mv = ModelVersion(
+        name="test-model", weights_path="/fake/weights.pt",
+        dataset_size=200, test_precision=precision, test_recall=recall, test_map50=map50,
+        is_active=is_active,
+    )
+    db.add(mv)
+    db.commit()
+    db.refresh(mv)
+    return mv
+
+
+def test_training_run_blocked_below_min_frames(client):
+    resp = client.post("/training/run", json={"epochs": 5})
+    assert resp.status_code == 422
+
+
+def test_training_run_returns_202_when_enough_frames(client, tmp_path):
+    _, video_id = _setup_video_with_rally(client)
+    with SessionLocal() as db:
+        for i in range(200):
+            img = tmp_path / f"f{i}.jpg"
+            img.write_bytes(b"fake")
+            lbl = tmp_path / f"f{i}.txt"
+            lbl.write_text("0 0.5 0.5 0.1 0.1\n")
+            _make_frame(db, video_id, str(img), str(lbl), FrameStatus.annotated)
+
+    from unittest.mock import patch, MagicMock
+    mock_model = MagicMock()
+    mock_model.train.return_value = MagicMock(results_dict={"train/box_loss": 0.05})
+    mock_metrics = MagicMock()
+    mock_metrics.box.mp = 0.85
+    mock_metrics.box.mr = 0.82
+    mock_metrics.box.map50 = 0.83
+
+    best = Path("/tmp/volleyball_cv_test_data/models/run_1/weights/best.pt")
+    best.parent.mkdir(parents=True, exist_ok=True)
+    best.write_bytes(b"fake")
+    mock_model.val.return_value = mock_metrics
+
+    with patch("ultralytics.YOLO", return_value=mock_model):
+        resp = client.post("/training/run", json={"epochs": 1})
+    assert resp.status_code == 202
+    assert "run_id" in resp.json()
+
+
+def test_list_models_returns_all(client):
+    with SessionLocal() as db:
+        _make_model_version(db, 0.8, 0.8, 0.8)
+        _make_model_version(db, 0.9, 0.9, 0.9, is_active=True)
+    resp = client.get("/models")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+
+def test_promote_first_model_always_allowed(client):
+    with SessionLocal() as db:
+        mv = _make_model_version(db, 0.8, 0.8, 0.8, is_active=False)
+        model_id = mv.id
+    resp = client.post(f"/models/{model_id}/promote")
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is True
+
+
+def test_promote_blocked_when_net_delta_negative(client):
+    with SessionLocal() as db:
+        _make_model_version(db, 0.9, 0.9, 0.9, is_active=True)
+        worse = _make_model_version(db, 0.7, 0.7, 0.7, is_active=False)
+        worse_id = worse.id
+    resp = client.post(f"/models/{worse_id}/promote")
+    assert resp.status_code == 409
+    assert "net_delta" in resp.json()["detail"]
+
+
+def test_promote_allowed_when_net_delta_positive(client):
+    with SessionLocal() as db:
+        _make_model_version(db, 0.7, 0.7, 0.7, is_active=True)
+        better = _make_model_version(db, 0.9, 0.9, 0.9, is_active=False)
+        better_id = better.id
+    resp = client.post(f"/models/{better_id}/promote")
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is True
+
+
+def test_promote_allowed_when_net_positive_despite_one_regressed_metric(client):
+    """precision +0.1, recall -0.05, map50 +0.1 → net +0.15 → allowed."""
+    with SessionLocal() as db:
+        _make_model_version(db, 0.7, 0.9, 0.7, is_active=True)
+        mixed = _make_model_version(db, 0.8, 0.85, 0.8, is_active=False)
+        mixed_id = mixed.id
+    resp = client.post(f"/models/{mixed_id}/promote")
+    assert resp.status_code == 200

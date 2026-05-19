@@ -143,3 +143,63 @@ def bootstrap_status(db: Session = Depends(get_db)):
 @router.post("/admin/reconcile", response_model=ReconcileResult)
 def run_reconcile(db: Session = Depends(get_db)):
     return reconcile(db)
+
+
+@router.post("/training/run", status_code=202)
+def start_training_run(
+    body: TrainingRunRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    annotated_count = db.query(LabeledFrame).filter_by(review_status=FrameStatus.annotated).count()
+    if annotated_count < MIN_FRAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"need at least {MIN_FRAMES} annotated frames, have {annotated_count}",
+        )
+    in_progress = db.query(TrainingRun).filter_by(status=TrainingStatus.running).first()
+    if in_progress:
+        raise HTTPException(status_code=409, detail="a training run is already in progress")
+    run = TrainingRun(status=TrainingStatus.pending, epochs=body.epochs)
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    background_tasks.add_task(run_training, run.id, body.epochs, DATABASE_URL)
+    return {"run_id": run.id}
+
+
+@router.get("/training/runs/{run_id}", response_model=TrainingRunRead)
+def get_training_run(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(TrainingRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="training run not found")
+    return run
+
+
+@router.get("/models", response_model=list[ModelVersionRead])
+def list_models(db: Session = Depends(get_db)):
+    return db.query(ModelVersion).order_by(ModelVersion.created_at.desc()).all()
+
+
+@router.post("/models/{model_id}/promote", response_model=ModelVersionRead)
+def promote_model(model_id: int, db: Session = Depends(get_db)):
+    new_model = db.get(ModelVersion, model_id)
+    if not new_model:
+        raise HTTPException(status_code=404, detail="model not found")
+    old_model = db.query(ModelVersion).filter_by(is_active=True).first()
+    if old_model and old_model.id != model_id:
+        net_delta = (
+            (new_model.test_precision or 0.0) - (old_model.test_precision or 0.0)
+            + (new_model.test_recall or 0.0) - (old_model.test_recall or 0.0)
+            + (new_model.test_map50 or 0.0) - (old_model.test_map50 or 0.0)
+        )
+        if net_delta <= 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"model did not improve overall (net_delta={net_delta:.4f})",
+            )
+        old_model.is_active = False
+    new_model.is_active = True
+    db.commit()
+    db.refresh(new_model)
+    return new_model
