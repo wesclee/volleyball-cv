@@ -1,6 +1,6 @@
 // frontend/src/test/api.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getMatches, createMatch, getMatchVideos, getRallies, patchRally, exportMatch, getLabelingStatus, getLabelingQueue } from '../api/client'
+import { getMatches, createMatch, getMatchVideos, getRallies, patchRally, exportMatch, getLabelingStatus, getLabelingQueue, uploadVideo } from '../api/client'
 
 describe('API client', () => {
   beforeEach(() => {
@@ -94,5 +94,59 @@ describe('API client', () => {
     mockFetch([])
     await getLabelingQueue()
     expect(fetch).toHaveBeenCalledWith('http://localhost:8000/labeling/queue', undefined)
+  })
+
+  describe('uploadVideo', () => {
+    const mockVideo = {
+      id: 10, match_id: 1, set_number: 1, raw_path: '/x.mp4',
+      status: 'pending', duration: null, created_at: '',
+    }
+
+    let mockXhr: {
+      open: ReturnType<typeof vi.fn>
+      send: ReturnType<typeof vi.fn>
+      upload: { onprogress?: (e: Partial<ProgressEvent>) => void }
+      onload?: () => void
+      onerror?: () => void
+      status: number
+      responseText: string
+    }
+
+    beforeEach(() => {
+      mockXhr = {
+        open: vi.fn(),
+        send: vi.fn(),
+        upload: {},
+        status: 200,
+        responseText: JSON.stringify(mockVideo),
+      }
+      vi.stubGlobal('XMLHttpRequest', function (this: unknown) { return mockXhr })
+    })
+
+    it('sends POST to /matches/{id}/videos and resolves with video', async () => {
+      const promise = uploadVideo(1, 1, new File([''], 'test.mp4'))
+      mockXhr.onload?.()
+      const result = await promise
+      expect(mockXhr.open).toHaveBeenCalledWith('POST', 'http://localhost:8000/matches/1/videos')
+      expect(mockXhr.send).toHaveBeenCalled()
+      expect(result.id).toBe(10)
+    })
+
+    it('calls onProgress with correct percentage during upload', async () => {
+      const onProgress = vi.fn()
+      const promise = uploadVideo(1, 1, new File([''], 'test.mp4'), onProgress)
+      mockXhr.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 100 } as ProgressEvent)
+      mockXhr.onload?.()
+      await promise
+      expect(onProgress).toHaveBeenCalledWith(50)
+    })
+
+    it('rejects on non-2xx status', async () => {
+      mockXhr.status = 422
+      mockXhr.responseText = 'Unprocessable Entity'
+      const promise = uploadVideo(1, 1, new File([''], 'test.mp4'))
+      mockXhr.onload?.()
+      await expect(promise).rejects.toThrow('422')
+    })
   })
 })

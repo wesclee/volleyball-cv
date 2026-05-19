@@ -34,11 +34,32 @@ export function getMatchVideos(matchId: number): Promise<Video[]> {
   return request(`/matches/${matchId}/videos`)
 }
 
-export function uploadVideo(matchId: number, setNumber: number, file: File): Promise<Video> {
-  const form = new FormData()
-  form.append('set_number', String(setNumber))
-  form.append('file', file)
-  return request(`/matches/${matchId}/videos`, { method: 'POST', body: form })
+export function uploadVideo(
+  matchId: number,
+  setNumber: number,
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<Video> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData()
+    form.append('set_number', String(setNumber))
+    form.append('file', file)
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${BASE}/matches/${matchId}/videos`)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded / e.total * 100)
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText) as Video)
+      } else {
+        reject(new Error(`${xhr.status} ${xhr.responseText}`))
+      }
+    }
+    xhr.onerror = () => reject(new Error('Network error'))
+    xhr.send(form)
+  })
 }
 
 export function processVideo(videoId: number): Promise<Job> {
