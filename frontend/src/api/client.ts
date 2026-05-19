@@ -1,6 +1,6 @@
 // frontend/src/api/client.ts
 import type {
-  AnnotateBbox, BootstrapStatus, Job, LabeledFrame, Match, MatchCreate, ModelVersion, ProcessedVideo, Rally, RallyUpdate, ReconcileResult, TrainingRun, Video,
+  AnnotateBbox, Job, LabeledFrame, LabelingStatus, Match, MatchCreate, ModelVersion, ProcessedVideo, Rally, RallyUpdate, ReconcileResult, TrainingRun, Video,
 } from '../types'
 
 const BASE = 'http://localhost:8000'
@@ -65,8 +65,12 @@ export function exportMatch(matchId: number): Promise<ProcessedVideo[]> {
   return request(`/matches/${matchId}/export`, { method: 'POST' })
 }
 
-export function getBootstrapStatus(): Promise<BootstrapStatus> {
-  return request('/bootstrap/status')
+export function getLabelingStatus(): Promise<LabelingStatus> {
+  return request('/labeling/status')
+}
+
+export function getLabelingQueue(): Promise<LabeledFrame[]> {
+  return request('/labeling/queue')
 }
 
 export function startExtraction(

@@ -1,6 +1,6 @@
 // frontend/src/test/api.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getMatches, createMatch, getMatchVideos, getRallies, patchRally, exportMatch } from '../api/client'
+import { getMatches, createMatch, getMatchVideos, getRallies, patchRally, exportMatch, getLabelingStatus, getLabelingQueue } from '../api/client'
 
 describe('API client', () => {
   beforeEach(() => {
@@ -75,5 +75,24 @@ describe('API client', () => {
       'http://localhost:8000/matches/1/export',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('getLabelingStatus — calls GET /labeling/status', async () => {
+    const mockStatus = {
+      frames_total: 10, annotated: 5, skipped: 2, pending: 3, missing: 0,
+      model_ready: false, active_model_id: null,
+      new_labeled_since_last_train: 0, retrain_recommended: false,
+      retrain_threshold: 50, last_trained_at_size: null,
+    }
+    mockFetch(mockStatus)
+    const result = await getLabelingStatus()
+    expect(fetch).toHaveBeenCalledWith('http://localhost:8000/labeling/status', undefined)
+    expect(result.retrain_threshold).toBe(50)
+  })
+
+  it('getLabelingQueue — calls GET /labeling/queue', async () => {
+    mockFetch([])
+    await getLabelingQueue()
+    expect(fetch).toHaveBeenCalledWith('http://localhost:8000/labeling/queue', undefined)
   })
 })
