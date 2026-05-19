@@ -28,7 +28,7 @@ class YoloDetector(BaseDetector):
             from ultralytics import YOLO
             self._model = YOLO(self.weights_path)
 
-    def detect(self, video_path: str) -> list[RallySegment]:
+    def detect_with_scores(self, video_path: str) -> tuple[list[RallySegment], list[float]]:
         self._load()
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -45,7 +45,11 @@ class YoloDetector(BaseDetector):
             )
             scores.append(max(confs) if confs else 0.0)
 
-        return self._segments_from_scores(scores, fps)
+        return self._segments_from_scores(scores, fps), scores
+
+    def detect(self, video_path: str) -> list[RallySegment]:
+        segments, _ = self.detect_with_scores(video_path)
+        return segments
 
     def _segments_from_scores(self, scores: list[float], fps: float) -> list[RallySegment]:
         segments: list[RallySegment] = []
