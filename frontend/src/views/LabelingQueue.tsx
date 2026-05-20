@@ -16,7 +16,6 @@ export default function LabelingQueue() {
   const [rect, setRect] = useState<Rect | null>(null)
   const [drawing, setDrawing] = useState(false)
   const [startPt, setStartPt] = useState<{ x: number; y: number } | null>(null)
-  const [phase, setPhase] = useState<'annotate' | 'training'>('annotate')
   const [runId, setRunId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [processedVideos, setProcessedVideos] = useState<Video[]>([])
@@ -150,7 +149,6 @@ export default function LabelingQueue() {
     try {
       const { run_id } = await startTraining(50)
       setRunId(run_id)
-      setPhase('training')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to start training')
     }
@@ -167,7 +165,6 @@ export default function LabelingQueue() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (phase !== 'annotate') return
       if (e.key === 'Enter') confirmRef.current()
       if (e.key === 'n' || e.key === 'N') noBallRef.current()
       if (e.key === 's' || e.key === 'S') skipRef.current()
@@ -175,17 +172,17 @@ export default function LabelingQueue() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [phase])
-
-  if (phase === 'training') {
-    return <TrainingPhase runId={runId!} onBack={() => setPhase('annotate')} />
-  }
+  }, [])
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Active Learning</h1>
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
+
+      {runId !== null && (
+        <TrainingPanel runId={runId} onDone={() => { setRunId(null); refresh() }} />
+      )}
 
       {status?.active_model_id && (
         <RetrainPanel status={status} onRetrain={handleRetrain} />
@@ -387,7 +384,7 @@ export function PromotionPanel({
   )
 }
 
-function TrainingPhase({ runId, onBack }: { runId: number; onBack: () => void }) {
+function TrainingPanel({ runId, onDone }: { runId: number; onDone: () => void }) {
   const [run, setRun] = useState<TrainingRun | null>(null)
   const [models, setModels] = useState<ModelVersion[]>([])
 
@@ -415,31 +412,33 @@ function TrainingPhase({ runId, onBack }: { runId: number; onBack: () => void })
   const newModel = run?.new_model_id ? models.find(m => m.id === run.new_model_id) : undefined
   const oldModel = models.find(m => m.is_active && m.id !== run?.new_model_id) ?? null
 
-  return (
-    <div className="p-6 max-w-4xl mx-auto space-y-4">
-      <h1 className="text-2xl font-bold">Training Run #{runId}</h1>
-      {!run && <p className="text-gray-500">Loading…</p>}
-      {run && run.status !== 'done' && run.status !== 'error' && (
-        <div>
-          <p className="text-gray-700">Status: <span className="font-mono">{run.status}</span></p>
-          <p className="text-gray-500 text-sm">Training in progress — checking every 3s…</p>
-        </div>
-      )}
-      {run?.status === 'error' && (
-        <div className="text-red-600">
-          <p className="font-semibold">Training failed</p>
-          <pre className="text-xs bg-red-50 p-2 rounded overflow-auto">{run.error}</pre>
-          <button onClick={onBack} className="mt-2 px-4 py-2 bg-gray-600 text-white rounded">
-            Back
-          </button>
-        </div>
-      )}
-      {run?.status === 'done' && newModel && (
-        <PromotionPanel runId={runId} oldModel={oldModel} newModel={newModel} onPromoted={onBack} />
-      )}
-      {run?.status === 'done' && !newModel && (
-        <p className="text-gray-500">Training complete — model version not found.</p>
-      )}
-    </div>
-  )
+  if (!run || run.status === 'pending' || run.status === 'running') {
+    return (
+      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded flex items-center gap-3">
+        <span className="text-blue-700 font-medium">Training run #{runId}</span>
+        <span className="text-blue-600 font-mono text-sm">{run?.status ?? 'starting…'}</span>
+        <span className="text-blue-500 text-sm">— you can keep annotating</span>
+      </div>
+    )
+  }
+
+  if (run.status === 'error') {
+    return (
+      <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded">
+        <p className="text-red-700 font-semibold">Training run #{runId} failed</p>
+        <pre className="text-xs text-red-600 mt-1 overflow-auto">{run.error}</pre>
+        <button onClick={onDone} className="mt-2 px-3 py-1 bg-gray-600 text-white text-sm rounded">Dismiss</button>
+      </div>
+    )
+  }
+
+  if (run.status === 'done' && newModel) {
+    return (
+      <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded">
+        <PromotionPanel runId={runId} oldModel={oldModel} newModel={newModel} onPromoted={onDone} />
+      </div>
+    )
+  }
+
+  return null
 }
