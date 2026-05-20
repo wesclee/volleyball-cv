@@ -23,14 +23,6 @@ def list_matches(db: Session = Depends(get_db)):
     return db.query(Match).all()
 
 
-@router.get("/{match_id}", response_model=MatchRead)
-def get_match(match_id: int, db: Session = Depends(get_db)):
-    match = db.get(Match, match_id)
-    if not match:
-        raise HTTPException(status_code=404, detail="Match not found")
-    return match
-
-
 @router.get("/videos", response_model=list[VideoRead])
 def list_all_videos(status: str | None = None, db: Session = Depends(get_db)):
     q = db.query(Video)
@@ -38,6 +30,14 @@ def list_all_videos(status: str | None = None, db: Session = Depends(get_db)):
         from backend.models.match import VideoStatus
         q = q.filter(Video.status == VideoStatus(status))
     return q.order_by(Video.id).all()
+
+
+@router.get("/{match_id}", response_model=MatchRead)
+def get_match(match_id: int, db: Session = Depends(get_db)):
+    match = db.get(Match, match_id)
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+    return match
 
 
 @router.get("/{match_id}/videos", response_model=list[VideoRead])
