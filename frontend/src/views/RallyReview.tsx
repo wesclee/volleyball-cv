@@ -5,6 +5,7 @@ import { createRally, deleteRally, getMatch, getMatchVideos, getRallies, patchRa
 import type { Match, Rally, Video } from '../types'
 
 const BACKEND = 'http://localhost:8000'
+const FRAME_STEP_SECONDS = 1 / 30
 
 interface VideoWithRallies {
   video: Video
@@ -20,6 +21,14 @@ export default function RallyReview() {
   const [draftStart, setDraftStart] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [previewingRallyId, setPreviewingRallyId] = useState<number | null>(null)
+  const [isInMarkedTime, setIsInMarkedTime] = useState(false)
+  const [currentTimestamp, setCurrentTimestamp] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [previousFrameKey, setPreviousFrameKey] = useState('ArrowLeft')
+  const [nextFrameKey, setNextFrameKey] = useState('ArrowRight')
+  const [capturingKey, setCapturingKey] = useState<'previous' | 'next' | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
@@ -91,6 +100,18 @@ export default function RallyReview() {
     }
   }
 
+  async function setSelectedBoundaryFromCurrentTime(field: 'start_time' | 'end_time') {
+    if (!activeRallyData) return
+    const num = currentTime()
+    setError(null)
+    try {
+      const updated = await patchRally(activeRallyData.id, { [field]: num })
+      updateLocalRally(activeRallyData.id, updated)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update rally time.')
+    }
+  }
+
   function currentTime() {
     return Number((videoRef.current?.currentTime ?? 0).toFixed(2))
   }
@@ -142,6 +163,34 @@ export default function RallyReview() {
     videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime + deltaSeconds)
   }
 
+  function stepFrame(direction: -1 | 1) {
+    if (!videoRef.current) return
+    videoRef.current.pause()
+    setPreviewingRallyId(null)
+    const nextTime = Math.min(
+      duration || Number.POSITIVE_INFINITY,
+      Math.max(0, videoRef.current.currentTime + direction * FRAME_STEP_SECONDS),
+    )
+    videoRef.current.currentTime = nextTime
+    syncRallySelectionForTime(nextTime)
+  }
+
+  async function togglePlayback() {
+    if (!videoRef.current) return
+    if (videoRef.current.paused) {
+      await videoRef.current.play()
+    } else {
+      videoRef.current.pause()
+    }
+  }
+
+  function scrubTo(value: string) {
+    const time = Number(value)
+    if (!videoRef.current || Number.isNaN(time)) return
+    videoRef.current.currentTime = time
+    syncRallySelectionForTime(time)
+  }
+
   const activeRallyData = sets
     .find(s => s.video.id === activeRally?.videoId)
     ?.rallies.find(r => r.id === activeRally?.rallyId)
@@ -179,14 +228,40 @@ export default function RallyReview() {
       if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return
       if (e.key.toLowerCase() === 's') markStart()
       if (e.key.toLowerCase() === 'e') void markEnd()
-      if (e.key === 'ArrowLeft') seek(e.shiftKey ? -5 : -0.5)
-      if (e.key === 'ArrowRight') seek(e.shiftKey ? 5 : 0.5)
+      if (e.key === previousFrameKey) {
+        e.preventDefault()
+        if (e.shiftKey) seek(-5)
+        else stepFrame(-1)
+      }
+      if (e.key === nextFrameKey) {
+        e.preventDefault()
+        if (e.shiftKey) seek(5)
+        else stepFrame(1)
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   })
 
   const activeVideo = sets.find(s => s.video.id === activeVideoId)?.video ?? sets[0]?.video
+  const activeVideoRallies = sets.find(s => s.video.id === activeVideo?.id)?.rallies ?? []
+
+  function syncRallySelectionForTime(time: number) {
+    setCurrentTimestamp(time)
+    if (!activeVideo) return
+    const matchingRally = activeVideoRallies.find(r => time >= r.start_time && time <= r.end_time)
+    if (matchingRally) {
+      setIsInMarkedTime(true)
+      if (activeRally?.rallyId !== matchingRally.id || activeRally?.videoId !== activeVideo.id) {
+        setActiveRally({ videoId: activeVideo.id, rallyId: matchingRally.id })
+      }
+      return
+    }
+    setIsInMarkedTime(false)
+    if (activeRally?.videoId === activeVideo.id) {
+      setActiveRally(null)
+    }
+  }
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -201,21 +276,86 @@ export default function RallyReview() {
       {activeVideo && (
         <div className="mb-6">
           <div className={`rounded border-4 overflow-hidden ${
-            activeRallyData ? 'border-purple-500' : 'border-gray-300'
+            activeRallyData ? 'border-purple-500' : 'border-yellow-400'
           }`}>
           <video
             ref={videoRef}
             src={`${BACKEND}/uploads/${activeVideo.raw_path.split('/').pop()}`}
-            controls
+            onTimeUpdate={e => syncRallySelectionForTime(e.currentTarget.currentTime)}
+            onSeeked={e => syncRallySelectionForTime(e.currentTarget.currentTime)}
+            onLoadedMetadata={e => {
+              setDuration(e.currentTarget.duration || 0)
+              syncRallySelectionForTime(e.currentTarget.currentTime)
+            }}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            onEnded={() => setIsPlaying(false)}
             className="w-full max-h-96 bg-black block"
           />
           </div>
+          <div className="mt-2 rounded border border-gray-200 bg-white px-3 py-2">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => void togglePlayback()}
+                className="w-16 rounded bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                {isPlaying ? 'Pause' : 'Play'}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={duration || 0}
+                step={0.001}
+                value={Math.min(currentTimestamp, duration || currentTimestamp)}
+                onChange={e => scrubTo(e.target.value)}
+                className="h-2 flex-1 accent-purple-600"
+                aria-label="video timeline"
+              />
+              <span className="w-32 text-right font-mono text-xs text-gray-600">
+                {currentTimestamp.toFixed(3)}s / {duration ? duration.toFixed(3) : '0.000'}s
+              </span>
+              <button
+                onClick={() => setSettingsOpen(open => !open)}
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Settings
+              </button>
+            </div>
+          </div>
+          {settingsOpen && (
+            <div className="mt-2 rounded border border-gray-200 bg-white p-3">
+              <h2 className="mb-2 text-sm font-semibold text-gray-800">Keybinds</h2>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <KeybindControl
+                  label="Back one frame"
+                  value={previousFrameKey}
+                  capturing={capturingKey === 'previous'}
+                  onCaptureStart={() => setCapturingKey('previous')}
+                  onCapture={key => { setPreviousFrameKey(key); setCapturingKey(null) }}
+                />
+                <KeybindControl
+                  label="Forward one frame"
+                  value={nextFrameKey}
+                  capturing={capturingKey === 'next'}
+                  onCaptureStart={() => setCapturingKey('next')}
+                  onCapture={key => { setNextFrameKey(key); setCapturingKey(null) }}
+                />
+              </div>
+            </div>
+          )}
           <div className={`mt-2 inline-flex rounded px-3 py-1 text-xs font-medium ${
-            activeRallyData ? 'bg-purple-50 text-purple-700' : 'bg-gray-100 text-gray-600'
+            activeRallyData
+              ? 'bg-purple-50 text-purple-700'
+              : isInMarkedTime
+                ? 'bg-purple-50 text-purple-700'
+                : 'bg-yellow-50 text-yellow-700'
           }`}>
             {activeRallyData
               ? `Rally selected: ${activeRallyData.start_time.toFixed(2)}s-${activeRallyData.end_time.toFixed(2)}s`
-              : 'Full video'}
+              : 'Unmarked time'}
+          </div>
+          <div className="mt-2 text-sm font-mono text-gray-700">
+            Timestamp: {currentTimestamp.toFixed(3)}s
           </div>
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             <button onClick={() => seek(-5)} className="border rounded px-3 py-1 text-sm">-5s</button>
@@ -236,6 +376,18 @@ export default function RallyReview() {
               <>
                 <button onClick={() => void playSelectedRally()} className="bg-purple-600 hover:bg-purple-700 text-white rounded px-4 py-1.5 text-sm font-medium">
                   Play Rally
+                </button>
+                <button
+                  onClick={() => void setSelectedBoundaryFromCurrentTime('start_time')}
+                  className="bg-blue-50 hover:bg-blue-100 text-blue-700 rounded px-3 py-1.5 text-sm font-medium"
+                >
+                  Set Start
+                </button>
+                <button
+                  onClick={() => void setSelectedBoundaryFromCurrentTime('end_time')}
+                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded px-3 py-1.5 text-sm font-medium"
+                >
+                  Set End
                 </button>
                 {previewingRallyId === activeRallyData.id && (
                   <button onClick={stopPreview} className="border rounded px-3 py-1 text-sm">
@@ -284,7 +436,7 @@ export default function RallyReview() {
                         <input
                           type="number"
                           step="0.5"
-                          defaultValue={r.start_time}
+                          value={r.start_time}
                           onChange={e => handleTimestampPreview('start_time', e.target.value)}
                           onBlur={e => handleTimestampBlur(r, 'start_time', e.target.value)}
                           onClick={e => e.stopPropagation()}
@@ -295,7 +447,7 @@ export default function RallyReview() {
                         <input
                           type="number"
                           step="0.5"
-                          defaultValue={r.end_time}
+                          value={r.end_time}
                           onChange={e => handleTimestampPreview('end_time', e.target.value)}
                           onBlur={e => handleTimestampBlur(r, 'end_time', e.target.value)}
                           onClick={e => e.stopPropagation()}
@@ -339,5 +491,40 @@ export default function RallyReview() {
         </Link>
       </div>
     </div>
+  )
+}
+
+function KeybindControl({
+  label,
+  value,
+  capturing,
+  onCaptureStart,
+  onCapture,
+}: {
+  label: string
+  value: string
+  capturing: boolean
+  onCaptureStart: () => void
+  onCapture: (key: string) => void
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="font-medium text-gray-700">{label}</span>
+      <button
+        type="button"
+        onClick={onCaptureStart}
+        onKeyDown={e => {
+          if (!capturing) return
+          e.preventDefault()
+          e.stopPropagation()
+          onCapture(e.key)
+        }}
+        className={`rounded border px-3 py-2 text-left font-mono text-xs ${
+          capturing ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-300 bg-gray-50 text-gray-700'
+        }`}
+      >
+        {capturing ? 'Press a key...' : value}
+      </button>
+    </label>
   )
 }
