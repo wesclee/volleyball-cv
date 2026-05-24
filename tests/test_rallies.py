@@ -44,6 +44,42 @@ def test_list_rallies(client):
     assert data[1]["start_time"] == 30.0
 
 
+def test_create_manual_rally(client):
+    _, video_id = _setup(client)
+    resp = client.post(f"/videos/{video_id}/rallies", json={"start_time": 12.5, "end_time": 19.0})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["video_id"] == video_id
+    assert data["start_time"] == 12.5
+    assert data["end_time"] == 19.0
+    assert data["confidence"] == 1.0
+
+
+def test_create_manual_rally_rejects_invalid_range(client):
+    _, video_id = _setup(client)
+    resp = client.post(f"/videos/{video_id}/rallies", json={"start_time": 20.0, "end_time": 20.0})
+    assert resp.status_code == 400
+
+
+def test_create_manual_rally_rejects_overlap(client):
+    from backend.database import SessionLocal
+    _, video_id = _setup(client)
+    with SessionLocal() as db:
+        _seed_rally(db, video_id)
+    resp = client.post(f"/videos/{video_id}/rallies", json={"start_time": 20.0, "end_time": 30.0})
+    assert resp.status_code == 409
+    assert "overlaps" in resp.json()["detail"]
+
+
+def test_create_manual_rally_allows_touching_boundary(client):
+    from backend.database import SessionLocal
+    _, video_id = _setup(client)
+    with SessionLocal() as db:
+        _seed_rally(db, video_id)
+    resp = client.post(f"/videos/{video_id}/rallies", json={"start_time": 25.0, "end_time": 30.0})
+    assert resp.status_code == 200
+
+
 def test_patch_rally_score(client):
     from backend.database import SessionLocal
     _, video_id = _setup(client)
@@ -57,6 +93,30 @@ def test_patch_rally_score(client):
     assert data["score_away"] == 3
 
 
+def test_patch_rally_rejects_overlap(client):
+    from backend.database import SessionLocal
+    from backend.models.match import Rally
+    _, video_id = _setup(client)
+    with SessionLocal() as db:
+        first = _seed_rally(db, video_id)
+        db.add(Rally(video_id=video_id, start_time=30.0, end_time=40.0, confidence=1.0))
+        db.commit()
+        first_id = first.id
+    resp = client.patch(f"/rallies/{first_id}", json={"end_time": 35.0})
+    assert resp.status_code == 409
+
+
 def test_patch_rally_not_found(client):
     resp = client.patch("/rallies/999", json={"score_home": 1})
     assert resp.status_code == 404
+
+
+def test_delete_rally(client):
+    from backend.database import SessionLocal
+    _, video_id = _setup(client)
+    with SessionLocal() as db:
+        rally = _seed_rally(db, video_id)
+        rally_id = rally.id
+    resp = client.delete(f"/rallies/{rally_id}")
+    assert resp.status_code == 204
+    assert client.get(f"/videos/{video_id}/rallies").json() == []

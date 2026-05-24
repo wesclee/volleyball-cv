@@ -52,6 +52,11 @@ export interface RallyUpdate {
   end_time?: number
 }
 
+export interface RallyCreate {
+  start_time: number
+  end_time: number
+}
+
 export interface ProcessedVideo {
   id: number
   match_id: number
@@ -77,6 +82,10 @@ export interface LabeledFrame {
   pred_w: number | null
   pred_h: number | null
   pred_conf: number | null
+  label_cx: number | null
+  label_cy: number | null
+  label_w: number | null
+  label_h: number | null
   created_at: string
 }
 
@@ -107,6 +116,8 @@ export interface TrainingRun {
 
 export interface LabelingStatus {
   frames_total: number
+  source_videos_total: number
+  source_videos_labeled: number
   annotated: number
   skipped: number
   pending: number

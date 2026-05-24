@@ -29,6 +29,8 @@ describe('RallyReview', () => {
     vi.mocked(api.getMatchVideos).mockResolvedValue([VIDEO])
     vi.mocked(api.getRallies).mockResolvedValue([RALLY])
     vi.mocked(api.patchRally).mockResolvedValue({ ...RALLY, score_home: 1, score_away: 0 })
+    vi.mocked(api.createRally).mockResolvedValue({ ...RALLY, id: 21, start_time: 70, end_time: 80 })
+    vi.mocked(api.deleteRally).mockResolvedValue(undefined)
   })
 
   it('renders match title and set heading', async () => {
@@ -64,6 +66,26 @@ describe('RallyReview', () => {
     vi.mocked(api.getRallies).mockResolvedValue([])
     renderWithRoute()
     await screen.findByText(/set 1/i)
-    expect(screen.getByText(/no rallies detected/i)).toBeInTheDocument()
+    expect(screen.getByText(/no rallies labelled/i)).toBeInTheDocument()
+  })
+
+  it('creates a manual rally from marked start and end', async () => {
+    const user = userEvent.setup()
+    renderWithRoute()
+    const video = await screen.findByRole('button', { name: /mark start/i })
+    const media = document.querySelector('video') as HTMLVideoElement
+    Object.defineProperty(media, 'currentTime', { value: 70, writable: true })
+    await user.click(video)
+    media.currentTime = 80
+    await user.click(screen.getByRole('button', { name: /^mark end$/i }))
+    await waitFor(() => expect(api.createRally).toHaveBeenCalledWith(10, { start_time: 70, end_time: 80 }))
+  })
+
+  it('deletes a bad rally', async () => {
+    const user = userEvent.setup()
+    renderWithRoute()
+    await screen.findByDisplayValue('30')
+    await user.click(screen.getByRole('button', { name: /delete/i }))
+    await waitFor(() => expect(api.deleteRally).toHaveBeenCalledWith(20))
   })
 })

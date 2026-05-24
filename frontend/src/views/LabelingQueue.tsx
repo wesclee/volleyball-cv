@@ -2,17 +2,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AnnotateBbox, LabeledFrame, LabelingStatus, ModelVersion, TrainingRun, Video } from '../types'
 import {
-  annotateFrame, getAllVideos, getLabelingStatus, getLabelingQueue, getFrames,
-  getFrameImageUrl, getModels, getTrainingRun, promoteModel, skipFrame, startExtraction, startTraining,
+  annotateFrame, deleteTrainingVideo, getAllVideos, getLabelingStatus, getLabelingQueue, getFrames,
+  getFrameImageUrl, getModels, getTrainingRun, getTrainingVideos, promoteModel, skipFrame, startExtraction,
+  startTraining, uploadTrainingVideo,
 } from '../api/client'
 
 interface Rect { x: number; y: number; w: number; h: number }
+const FRAME_PAGE_SIZE = 20
 
 export default function LabelingQueue() {
   const [status, setStatus] = useState<LabelingStatus | null>(null)
   const [bootstrapFrames, setBootstrapFrames] = useState<LabeledFrame[]>([])
   const [queueFrames, setQueueFrames] = useState<LabeledFrame[]>([])
+  const [allFrames, setAllFrames] = useState<LabeledFrame[]>([])
   const [idx, setIdx] = useState(0)
+  const [framePage, setFramePage] = useState(0)
+  const [frameMode, setFrameMode] = useState<'pending' | 'all'>('pending')
   const [rect, setRect] = useState<Rect | null>(null)
   const [drawing, setDrawing] = useState(false)
   const [startPt, setStartPt] = useState<{ x: number; y: number } | null>(null)
@@ -20,25 +25,37 @@ export default function LabelingQueue() {
   const [error, setError] = useState<string | null>(null)
   const [processedVideos, setProcessedVideos] = useState<Video[]>([])
   const [extracting, setExtracting] = useState<number | null>(null)
+  const [trainingFile, setTrainingFile] = useState<File | null>(null)
+  const [trainingLabel, setTrainingLabel] = useState('')
+  const [sampleRate, setSampleRate] = useState(30)
+  const [maxFrames, setMaxFrames] = useState(500)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [uploadingTraining, setUploadingTraining] = useState(false)
+  const [trainingVideos, setTrainingVideos] = useState<Video[]>([])
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
 
   const isBootstrapMode = !status?.active_model_id
-  const frames = isBootstrapMode ? bootstrapFrames : queueFrames
+  const pendingFrames = isBootstrapMode ? bootstrapFrames : queueFrames
+  const frames = frameMode === 'all' ? allFrames : pendingFrames
   const currentFrame: LabeledFrame | undefined = frames[idx]
 
   const refresh = useCallback(async () => {
-    const [s, allPending, queue, videos] = await Promise.all([
+    const [s, allPending, queue, videos, training, pageFrames] = await Promise.all([
       getLabelingStatus(),
       getFrames({ status: 'pending' }),
       getLabelingQueue(),
       getAllVideos('done'),
+      getTrainingVideos(),
+      getFrames({ offset: framePage * FRAME_PAGE_SIZE, limit: FRAME_PAGE_SIZE }),
     ])
     setStatus(s)
     setBootstrapFrames(allPending.filter(f => f.pred_conf === null))
     setQueueFrames(queue)
     setProcessedVideos(videos)
-  }, [])
+    setTrainingVideos(training)
+    setAllFrames(pageFrames)
+  }, [framePage])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -51,7 +68,16 @@ export default function LabelingQueue() {
       canvas.width = img.naturalWidth
       canvas.height = img.naturalHeight
       ctx.drawImage(img, 0, 0)
-      if (!rect && currentFrame.pred_cx != null) {
+      if (!rect && currentFrame.label_cx != null) {
+        const px = (currentFrame.label_cx - currentFrame.label_w! / 2) * canvas.width
+        const py = (currentFrame.label_cy! - currentFrame.label_h! / 2) * canvas.height
+        const pw = currentFrame.label_w! * canvas.width
+        const ph = currentFrame.label_h! * canvas.height
+        ctx.strokeStyle = '#22c55e'
+        ctx.lineWidth = 3
+        ctx.strokeRect(px, py, pw, ph)
+      }
+      if (!rect && currentFrame.label_cx == null && currentFrame.pred_cx != null) {
         const px = (currentFrame.pred_cx - currentFrame.pred_w! / 2) * canvas.width
         const py = (currentFrame.pred_cy! - currentFrame.pred_h! / 2) * canvas.height
         const pw = currentFrame.pred_w! * canvas.width
@@ -104,6 +130,13 @@ export default function LabelingQueue() {
         w: rect.w / canvas.width,
         h: rect.h / canvas.height,
       }
+    } else if (currentFrame.label_cx != null) {
+      bbox = {
+        cx: currentFrame.label_cx,
+        cy: currentFrame.label_cy!,
+        w: currentFrame.label_w!,
+        h: currentFrame.label_h!,
+      }
     } else if (currentFrame.pred_cx != null) {
       bbox = {
         cx: currentFrame.pred_cx,
@@ -116,7 +149,7 @@ export default function LabelingQueue() {
     }
     await annotateFrame(currentFrame.id, bbox)
     setRect(null)
-    setIdx(i => i + 1)
+    setIdx(i => Math.min(i + 1, frames.length - 1))
     await refresh()
   }
 
@@ -124,24 +157,62 @@ export default function LabelingQueue() {
     if (!currentFrame) return
     await skipFrame(currentFrame.id)
     setRect(null)
-    setIdx(i => i + 1)
+    setIdx(i => Math.min(i + 1, frames.length - 1))
     await refresh()
   }
 
   const skip = () => {
     setRect(null)
-    setIdx(i => i + 1)
+    setIdx(i => Math.min(i + 1, frames.length - 1))
   }
 
   const handleExtract = async (videoId: number) => {
     setExtracting(videoId)
     try {
-      await startExtraction(videoId)
+      await startExtraction(videoId, {
+        sample_rate: sampleRate,
+        max_frames: maxFrames,
+        whole_video: true,
+      })
       await refresh()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Extraction failed')
     } finally {
       setExtracting(null)
+    }
+  }
+
+  const handleTrainingUpload = async () => {
+    if (!trainingFile) return
+    setUploadingTraining(true)
+    setUploadProgress(0)
+    setError(null)
+    try {
+      const video = await uploadTrainingVideo(trainingFile, trainingLabel.trim() || undefined, setUploadProgress)
+      await startExtraction(video.id, {
+        sample_rate: sampleRate,
+        max_frames: maxFrames,
+        whole_video: true,
+      })
+      setTrainingFile(null)
+      setTrainingLabel('')
+      await refresh()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Training video upload failed')
+    } finally {
+      setUploadingTraining(false)
+      setUploadProgress(null)
+    }
+  }
+
+  const handleDeleteTrainingVideo = async (videoId: number) => {
+    setError(null)
+    try {
+      await deleteTrainingVideo(videoId)
+      setIdx(0)
+      await refresh()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Training video delete failed')
     }
   }
 
@@ -174,9 +245,30 @@ export default function LabelingQueue() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
+  const switchFrameMode = (mode: 'pending' | 'all') => {
+    setFrameMode(mode)
+    setIdx(0)
+    setRect(null)
+  }
+
+  const nextPage = () => {
+    setFramePage(p => p + 1)
+    setIdx(0)
+    setRect(null)
+  }
+
+  const previousPage = () => {
+    setFramePage(p => Math.max(0, p - 1))
+    setIdx(0)
+    setRect(null)
+  }
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Active Learning</h1>
+      <div className="mb-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Ball labels</p>
+        <h1 className="text-2xl font-bold">Ball Detection Training</h1>
+      </div>
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
 
@@ -188,10 +280,86 @@ export default function LabelingQueue() {
         <RetrainPanel status={status} onRetrain={handleRetrain} />
       )}
 
+      <div className="mb-4 p-3 rounded bg-gray-50 border border-gray-200">
+        <p className="text-sm font-semibold mb-2">Add ball-label training footage</p>
+        <div className="grid gap-3 md:grid-cols-[1fr_120px_120px_auto]">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-gray-700">Video</span>
+            <input
+              type="file"
+              accept="video/*"
+              onChange={e => setTrainingFile(e.target.files?.[0] ?? null)}
+              className="text-sm"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-gray-700">Every N frames</span>
+            <input
+              type="number"
+              min={1}
+              value={sampleRate}
+              onChange={e => setSampleRate(Number(e.target.value))}
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-gray-700">Max frames</span>
+            <input
+              type="number"
+              min={1}
+              value={maxFrames}
+              onChange={e => setMaxFrames(Number(e.target.value))}
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <button
+            onClick={handleTrainingUpload}
+            disabled={!trainingFile || uploadingTraining}
+            className="self-end px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-40"
+          >
+            {uploadingTraining ? 'Adding...' : 'Add'}
+          </button>
+        </div>
+        <input
+          type="text"
+          placeholder="Optional label"
+          value={trainingLabel}
+          onChange={e => setTrainingLabel(e.target.value)}
+          className="mt-3 w-full border rounded px-2 py-1 text-sm"
+        />
+        {uploadProgress !== null && (
+          <div className="mt-3 h-2 bg-gray-200 rounded overflow-hidden">
+            <div className="h-full bg-blue-600" style={{ width: `${uploadProgress}%` }} />
+          </div>
+        )}
+      </div>
+
+      {trainingVideos.length > 0 && (
+        <div className="mb-4 p-3 rounded bg-gray-50 border border-gray-200">
+          <p className="text-sm font-semibold mb-2">Ball-label training footage</p>
+          <div className="flex flex-col gap-2">
+            {trainingVideos.map(v => (
+              <div key={v.id} className="flex items-center gap-3">
+                <span className="text-sm font-mono">Video {v.id} — match {v.match_id}</span>
+                <button
+                  onClick={() => void handleDeleteTrainingVideo(v.id)}
+                  className="px-3 py-1 bg-red-50 text-red-700 text-sm rounded hover:bg-red-100"
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {status && isBootstrapMode && (
         <div className="flex items-center gap-4 mb-4">
           <span className="text-lg font-mono">
             {status.annotated} / {status.frames_total} frames annotated
+          </span>
+          <span className="text-sm font-mono text-gray-600">
+            {status.source_videos_labeled} / {Math.max(status.source_videos_total, trainingVideos.length)} videos represented
           </span>
           <button
             onClick={handleRetrain}
@@ -205,7 +373,7 @@ export default function LabelingQueue() {
 
       {isBootstrapMode && processedVideos.length > 0 && (
         <div className="mb-4 p-3 rounded bg-gray-50 border border-gray-200">
-          <p className="text-sm font-semibold mb-2">Extract frames from processed videos</p>
+          <p className="text-sm font-semibold mb-2">Extract frames from existing videos</p>
           <div className="flex flex-col gap-2">
             {processedVideos.map(v => (
               <div key={v.id} className="flex items-center gap-3">
@@ -223,14 +391,41 @@ export default function LabelingQueue() {
         </div>
       )}
 
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => switchFrameMode('pending')}
+          className={`px-3 py-1 rounded border text-sm ${frameMode === 'pending' ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white'}`}
+        >
+          Pending queue
+        </button>
+        <button
+          onClick={() => switchFrameMode('all')}
+          className={`px-3 py-1 rounded border text-sm ${frameMode === 'all' ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white'}`}
+        >
+          All frames
+        </button>
+        {frameMode === 'all' && (
+          <>
+            <button onClick={previousPage} disabled={framePage === 0} className="px-3 py-1 rounded border text-sm disabled:opacity-40">
+              Prev page
+            </button>
+            <span className="text-sm text-gray-600">Page {framePage + 1}</span>
+            <button onClick={nextPage} disabled={allFrames.length < FRAME_PAGE_SIZE} className="px-3 py-1 rounded border text-sm disabled:opacity-40">
+              Next page
+            </button>
+          </>
+        )}
+      </div>
+
       {currentFrame ? (
         <div className="space-y-3">
           <p className="text-sm text-gray-500">
-            Frame {idx + 1} of {frames.length}
+            Frame ID <span className="font-mono">{currentFrame.id}</span>
+            {' '}— {idx + 1} of {frames.length}
             {currentFrame.pred_conf != null && (
               <> — conf <span className="font-mono">{currentFrame.pred_conf.toFixed(2)}</span></>
             )}
-            {' '}— {currentFrame.split} split — t={currentFrame.timestamp.toFixed(2)}s
+            {' '}— {currentFrame.split} split — {currentFrame.review_status} — t={currentFrame.timestamp.toFixed(2)}s
           </p>
           <div className="relative border border-gray-300 rounded overflow-hidden" style={{ maxWidth: 640 }}>
             <img ref={imgRef} alt="frame" className="hidden" />
@@ -245,16 +440,16 @@ export default function LabelingQueue() {
           <div className="flex gap-2">
             <button
               onClick={confirm}
-              disabled={!rect && currentFrame.pred_cx == null}
+              disabled={!rect && currentFrame.pred_cx == null && currentFrame.label_cx == null}
               className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-40"
             >
-              Confirm
+              {currentFrame.review_status === 'annotated' ? 'Save label' : 'Confirm'}
             </button>
             <button onClick={noBall} className="px-4 py-2 bg-yellow-500 text-white rounded">
               No ball
             </button>
             <button onClick={skip} className="px-4 py-2 bg-gray-400 text-white rounded">
-              Skip
+              Next
             </button>
             <button onClick={() => setRect(null)} className="px-4 py-2 bg-red-400 text-white rounded">
               Redo
@@ -264,7 +459,7 @@ export default function LabelingQueue() {
       ) : (
         <p className="text-gray-500">
           {status?.frames_total === 0
-            ? 'No frames extracted yet. Use the Extract Frames button to sample from a processed video.'
+            ? 'No frames extracted yet. Add a training video or extract frames from an existing video.'
             : 'Queue empty — all pending frames reviewed.'}
         </p>
       )}
@@ -293,7 +488,6 @@ function RetrainPanel({ status, onRetrain }: { status: LabelingStatus; onRetrain
 }
 
 export function PromotionPanel({
-  runId,
   oldModel,
   newModel,
   onPromoted,

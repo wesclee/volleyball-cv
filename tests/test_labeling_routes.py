@@ -68,6 +68,8 @@ def test_labeling_status_no_model(client):
     data = resp.json()
     assert data["annotated"] == 1
     assert data["pending"] == 1
+    assert data["source_videos_total"] == 1
+    assert data["source_videos_labeled"] == 1
     assert data["new_labeled_since_last_train"] == 0
     assert data["retrain_recommended"] is False
     assert data["last_trained_at_size"] is None
@@ -103,6 +105,22 @@ def test_labeling_status_retrain_recommended(client):
     assert data["retrain_recommended"] is True
     assert data["new_labeled_since_last_train"] >= RETRAIN_THRESHOLD
     assert data["last_trained_at_size"] == 200
+
+
+def test_labeling_status_counts_distinct_source_videos(client):
+    tc, SessionLocal = client
+    with SessionLocal() as db:
+        first = _setup_video(db)
+        second = _setup_video(db)
+        _make_frame(db, first, "/a.jpg", "/a.txt", FrameStatus.annotated)
+        _make_frame(db, first, "/b.jpg", "/b.txt", FrameStatus.pending)
+        _make_frame(db, second, "/c.jpg", "/c.txt", FrameStatus.pending)
+
+    resp = tc.get("/labeling/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source_videos_total"] == 2
+    assert data["source_videos_labeled"] == 1
 
 
 def test_labeling_queue_returns_active_learning_frames_sorted(client):

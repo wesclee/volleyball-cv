@@ -1,14 +1,17 @@
 # backend/routers/bootstrap.py
 import logging
+import shutil
+import threading
+from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from backend.config import DATABASE_URL
+from backend.config import DATABASE_URL, UPLOADS_DIR
 from backend.database import get_db
-from backend.models.match import FrameStatus, FrameSplit, LabeledFrame, ModelVersion, TrainingRun, TrainingStatus
+from backend.models.match import FrameStatus, FrameSplit, LabeledFrame, Match, ModelVersion, TrainingRun, TrainingStatus, Video, VideoStatus
 from backend.schemas.match import (
     AnnotateRequest,
     BootstrapExtractRequest,
@@ -17,6 +20,7 @@ from backend.schemas.match import (
     ReconcileResult,
     TrainingRunRead,
     TrainingRunRequest,
+    VideoRead,
 )
 from backend.training.frame_extractor import extract_frames
 from backend.training.reconciler import reconcile
@@ -25,45 +29,136 @@ from backend.training.trainer import run_training
 
 router = APIRouter()
 MIN_FRAMES = 200
+TRAINING_MATCH_NOTE = "Created from Active Learning for frame extraction and labeling."
 
 
 def _extraction_task(video_id: int, sample_rate: int, max_frames: int,
-                     split_ratios: dict, db_url: str) -> None:
+                     split_ratios: dict, whole_video: bool, db_url: str) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
     try:
         with sessionmaker(bind=engine)() as db:
-            extract_frames(video_id, db, sample_rate, max_frames, split_ratios)
+            extract_frames(video_id, db, sample_rate, max_frames, split_ratios, whole_video)
     except Exception as exc:
         logging.getLogger(__name__).error("extraction failed for video %s: %s", video_id, exc)
     finally:
         engine.dispose()
 
 
+def _start_extraction(video_id: int, sample_rate: int, max_frames: int,
+                      split_ratios: dict, whole_video: bool) -> None:
+    thread = threading.Thread(
+        target=_extraction_task,
+        args=(video_id, sample_rate, max_frames, split_ratios, whole_video, DATABASE_URL),
+        daemon=True,
+    )
+    thread.start()
+
+
 @router.post("/bootstrap/extract/{video_id}", status_code=202)
 def start_extraction(
     video_id: int,
     body: BootstrapExtractRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="video not found")
     ratios = {"train": body.split_train, "val": body.split_val, "test": body.split_test}
     if abs(sum(ratios.values()) - 1.0) > 0.001:
         raise HTTPException(status_code=422, detail="split ratios must sum to 1.0")
-    background_tasks.add_task(
-        _extraction_task, video_id, body.sample_rate, body.max_frames, ratios, DATABASE_URL
-    )
+    raw_path = Path(video.raw_path)
+    if raw_path.exists() and raw_path.stat().st_size > 64:
+        _start_extraction(video_id, body.sample_rate, body.max_frames, ratios, body.whole_video)
+    else:
+        logging.getLogger(__name__).warning("extraction skipped for invalid video %s: %s", video_id, video.raw_path)
     return {"video_id": video_id}
+
+
+@router.post("/bootstrap/training-videos", response_model=VideoRead, status_code=status.HTTP_201_CREATED)
+def upload_training_video(
+    file: UploadFile,
+    label: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    training_match = Match(
+        date=date.today().isoformat(),
+        opponent=label or "Training footage",
+        venue=None,
+        notes=TRAINING_MATCH_NOTE,
+    )
+    db.add(training_match)
+    db.flush()
+
+    dest = UPLOADS_DIR / f"training_match{training_match.id}_{file.filename}"
+    with dest.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    video = Video(
+        match_id=training_match.id,
+        set_number=1,
+        raw_path=str(dest),
+        status=VideoStatus.done,
+    )
+    db.add(video)
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@router.get("/bootstrap/training-videos", response_model=list[VideoRead])
+def list_training_videos(db: Session = Depends(get_db)):
+    return (
+        db.query(Video)
+        .join(Match)
+        .filter(Match.notes == TRAINING_MATCH_NOTE)
+        .order_by(Video.created_at.desc())
+        .all()
+    )
+
+
+@router.delete("/bootstrap/training-videos/{video_id}", status_code=204)
+def delete_training_video(video_id: int, db: Session = Depends(get_db)):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="video not found")
+    match = db.get(Match, video.match_id)
+    if not match or match.notes != TRAINING_MATCH_NOTE:
+        raise HTTPException(status_code=400, detail="not a training video")
+
+    for frame in db.query(LabeledFrame).filter_by(video_id=video_id).all():
+        for path in (frame.img_path, frame.label_path):
+            try:
+                Path(path).unlink()
+            except FileNotFoundError:
+                pass
+
+    try:
+        Path(video.raw_path).unlink()
+    except FileNotFoundError:
+        pass
+
+    db.delete(video)
+    db.flush()
+    remaining = db.query(Video).filter_by(match_id=match.id).count()
+    if remaining == 0:
+        db.delete(match)
+    db.commit()
 
 
 @router.get("/bootstrap/frames", response_model=list[LabeledFrameRead])
 def list_frames(
     status: str | None = None,
     split: str | None = None,
+    video_id: int | None = None,
+    offset: int = 0,
+    limit: int | None = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(LabeledFrame)
+    if video_id:
+        q = q.filter(LabeledFrame.video_id == video_id)
     if status:
         try:
             q = q.filter(LabeledFrame.review_status == FrameStatus(status))
@@ -74,6 +169,9 @@ def list_frames(
             q = q.filter(LabeledFrame.split == FrameSplit(split))
         except ValueError:
             raise HTTPException(status_code=422, detail=f"invalid split: {split}")
+    q = q.order_by(LabeledFrame.id).offset(offset)
+    if limit is not None:
+        q = q.limit(limit)
     return q.all()
 
 

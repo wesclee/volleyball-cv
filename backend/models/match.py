@@ -119,6 +119,41 @@ class LabeledFrame(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     video: Mapped["Video"] = relationship(back_populates="labeled_frames")
 
+    def _label_values(self) -> list[float] | None:
+        try:
+            content = open(self.label_path, encoding="utf-8").read().strip()
+        except OSError:
+            return None
+        if not content:
+            return None
+        parts = content.split()
+        if len(parts) != 5 or parts[0] != "0":
+            return None
+        try:
+            return [float(v) for v in parts[1:]]
+        except ValueError:
+            return None
+
+    @property
+    def label_cx(self) -> float | None:
+        values = self._label_values()
+        return values[0] if values else None
+
+    @property
+    def label_cy(self) -> float | None:
+        values = self._label_values()
+        return values[1] if values else None
+
+    @property
+    def label_w(self) -> float | None:
+        values = self._label_values()
+        return values[2] if values else None
+
+    @property
+    def label_h(self) -> float | None:
+        values = self._label_values()
+        return values[3] if values else None
+
 
 class ModelVersion(Base):
     __tablename__ = "model_versions"

@@ -1,6 +1,10 @@
 // frontend/src/test/api.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getMatches, createMatch, getMatchVideos, getRallies, patchRally, exportMatch, getLabelingStatus, getLabelingQueue, uploadVideo } from '../api/client'
+import {
+  getMatches, createMatch, getMatchVideos, getRallies, createRally, patchRally, deleteRally,
+  exportMatch, getLabelingStatus, getLabelingQueue, getFrames, getTrainingVideos, deleteTrainingVideo,
+  uploadVideo,
+} from '../api/client'
 
 describe('API client', () => {
   beforeEach(() => {
@@ -63,6 +67,27 @@ describe('API client', () => {
     )
   })
 
+  it('createRally — calls POST /videos/{id}/rallies with JSON body', async () => {
+    mockFetch({ id: 1, video_id: 5, start_time: 10, end_time: 20 })
+    await createRally(5, { start_time: 10, end_time: 20 })
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/videos/5/rallies',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ start_time: 10, end_time: 20 }),
+      }),
+    )
+  })
+
+  it('deleteRally — calls DELETE /rallies/{id}', async () => {
+    mockFetch('', 204)
+    await deleteRally(1)
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/rallies/1',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
   it('throws on non-ok response', async () => {
     mockFetch('Not Found', 404)
     await expect(getMatchVideos(999)).rejects.toThrow('404')
@@ -79,7 +104,8 @@ describe('API client', () => {
 
   it('getLabelingStatus — calls GET /labeling/status', async () => {
     const mockStatus = {
-      frames_total: 10, annotated: 5, skipped: 2, pending: 3, missing: 0,
+      frames_total: 10, source_videos_total: 2, source_videos_labeled: 1,
+      annotated: 5, skipped: 2, pending: 3, missing: 0,
       model_ready: false, active_model_id: null,
       new_labeled_since_last_train: 0, retrain_recommended: false,
       retrain_threshold: 50, last_trained_at_size: null,
@@ -94,6 +120,27 @@ describe('API client', () => {
     mockFetch([])
     await getLabelingQueue()
     expect(fetch).toHaveBeenCalledWith('http://localhost:8000/labeling/queue', undefined)
+  })
+
+  it('getFrames — includes pagination params', async () => {
+    mockFetch([])
+    await getFrames({ offset: 20, limit: 20 })
+    expect(fetch).toHaveBeenCalledWith('http://localhost:8000/bootstrap/frames?offset=20&limit=20', undefined)
+  })
+
+  it('getTrainingVideos — calls GET /bootstrap/training-videos', async () => {
+    mockFetch([])
+    await getTrainingVideos()
+    expect(fetch).toHaveBeenCalledWith('http://localhost:8000/bootstrap/training-videos', undefined)
+  })
+
+  it('deleteTrainingVideo — calls DELETE /bootstrap/training-videos/{id}', async () => {
+    mockFetch('', 204)
+    await deleteTrainingVideo(9)
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/bootstrap/training-videos/9',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
   })
 
   describe('uploadVideo', () => {

@@ -15,6 +15,7 @@ def extract_frames(
     sample_rate: int = 30,
     max_frames: int = 500,
     split_ratios: dict[str, float] | None = None,
+    whole_video: bool = False,
 ) -> int:
     if split_ratios is None:
         split_ratios = {"train": 0.8, "val": 0.1, "test": 0.1}
@@ -24,7 +25,7 @@ def extract_frames(
         raise ValueError(f"Video {video_id} not found")
 
     rallies = db.query(Rally).filter_by(video_id=video_id).all()
-    if not rallies:
+    if not rallies and not whole_video:
         raise ValueError(f"No rallies found for video {video_id}")
 
     FRAMES_DIR.mkdir(parents=True, exist_ok=True)
@@ -44,10 +45,14 @@ def extract_frames(
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
 
         candidates: list[int] = []
-        for rally in rallies:
-            start_f = int(rally.start_time * fps)
-            end_f = int(rally.end_time * fps)
-            candidates.extend(range(start_f, end_f, sample_rate))
+        if whole_video:
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            candidates.extend(range(0, frame_count, sample_rate))
+        else:
+            for rally in rallies:
+                start_f = int(rally.start_time * fps)
+                end_f = int(rally.end_time * fps)
+                candidates.extend(range(start_f, end_f, sample_rate))
 
         candidates = sorted(set(candidates) - existing)
         if len(candidates) > max_frames:

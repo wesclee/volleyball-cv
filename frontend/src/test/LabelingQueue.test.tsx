@@ -9,9 +9,12 @@ vi.mock('../api/client', () => ({
   getLabelingQueue: vi.fn(),
   getFrames: vi.fn(),
   getAllVideos: vi.fn().mockResolvedValue([]),
+  getTrainingVideos: vi.fn().mockResolvedValue([]),
   getFrameImageUrl: vi.fn((id: number) => `/frames/${id}`),
   annotateFrame: vi.fn().mockResolvedValue({}),
   skipFrame: vi.fn().mockResolvedValue({}),
+  uploadTrainingVideo: vi.fn().mockResolvedValue({ id: 9 }),
+  deleteTrainingVideo: vi.fn().mockResolvedValue(undefined),
   startExtraction: vi.fn().mockResolvedValue({ video_id: 1 }),
   startTraining: vi.fn().mockResolvedValue({ run_id: 1 }),
   getTrainingRun: vi.fn(),
@@ -22,7 +25,8 @@ vi.mock('../api/client', () => ({
 import * as client from '../api/client'
 
 const noModelStatus: LabelingStatus = {
-  frames_total: 0, annotated: 0, skipped: 0, pending: 0, missing: 0,
+  frames_total: 0, source_videos_total: 0, source_videos_labeled: 0,
+  annotated: 0, skipped: 0, pending: 0, missing: 0,
   model_ready: false, active_model_id: null,
   new_labeled_since_last_train: 0, retrain_recommended: false,
   retrain_threshold: 50, last_trained_at_size: null,
@@ -45,6 +49,10 @@ function mockFrame(id: number, predConf: number | null = null): LabeledFrame {
     pred_w: predConf != null ? 0.1 : null,
     pred_h: predConf != null ? 0.1 : null,
     pred_conf: predConf,
+    label_cx: null,
+    label_cy: null,
+    label_w: null,
+    label_h: null,
     created_at: '2026-01-01T00:00:00',
   }
 }
@@ -56,16 +64,16 @@ describe('LabelingQueue — bootstrap mode', () => {
     vi.mocked(client.getLabelingQueue).mockResolvedValue([])
   })
 
-  it('shows bootstrap heading when no active model', async () => {
+  it('shows ball labeling heading when no active model', async () => {
     render(<LabelingQueue />)
     await waitFor(() => {
-      expect(screen.getByText(/Active Learning/i)).toBeInTheDocument()
+      expect(screen.getByText(/Ball Detection Training/i)).toBeInTheDocument()
     })
   })
 
   it('does not show retrain panel when no model', async () => {
     render(<LabelingQueue />)
-    await waitFor(() => screen.getByText(/Active Learning/i))
+    await waitFor(() => screen.getByText(/Ball Detection Training/i))
     expect(screen.queryByText(/new frames/i)).not.toBeInTheDocument()
   })
 })
@@ -109,6 +117,34 @@ describe('LabelingQueue — active review mode', () => {
     fireEvent.click(screen.getByText(/No ball/i))
     await waitFor(() => {
       expect(client.skipFrame).toHaveBeenCalledWith(1)
+    })
+  })
+
+  it('can switch to all frames and shows frame id/status', async () => {
+    vi.mocked(client.getFrames).mockImplementation((params = {}) => {
+      if ('offset' in params || 'limit' in params) {
+        return Promise.resolve([{ ...mockFrame(8, null), review_status: 'annotated', label_cx: 0.5, label_cy: 0.5, label_w: 0.1, label_h: 0.1 }])
+      }
+      return Promise.resolve([])
+    })
+    render(<LabelingQueue />)
+    await waitFor(() => screen.getByRole('button', { name: /all frames/i }))
+    fireEvent.click(screen.getByRole('button', { name: /all frames/i }))
+    await waitFor(() => {
+      expect(screen.getByText('8')).toBeInTheDocument()
+      expect(screen.getByText(/annotated/i)).toBeInTheDocument()
+    })
+  })
+
+  it('deletes training footage', async () => {
+    vi.mocked(client.getTrainingVideos).mockResolvedValue([
+      { id: 9, match_id: 2, set_number: 1, raw_path: '/uploads/t.mp4', status: 'done', duration: null, created_at: '' },
+    ])
+    render(<LabelingQueue />)
+    await waitFor(() => screen.getByText(/training footage/i))
+    fireEvent.click(screen.getByRole('button', { name: /delete/i }))
+    await waitFor(() => {
+      expect(client.deleteTrainingVideo).toHaveBeenCalledWith(9)
     })
   })
 

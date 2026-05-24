@@ -23,6 +23,13 @@ def labeling_status(db: Session = Depends(get_db)):
     skipped = counts.get(FrameStatus.skipped, 0)
     pending = counts.get(FrameStatus.pending, 0)
     missing = counts.get(FrameStatus.missing, 0)
+    source_videos_total = db.query(func.count(func.distinct(LabeledFrame.video_id))).scalar() or 0
+    source_videos_labeled = (
+        db.query(func.count(func.distinct(LabeledFrame.video_id)))
+        .filter(LabeledFrame.review_status.in_([FrameStatus.annotated, FrameStatus.skipped]))
+        .scalar()
+        or 0
+    )
 
     active = db.query(ModelVersion).filter_by(is_active=True).first()
     last_model = db.query(ModelVersion).order_by(ModelVersion.created_at.desc()).first()
@@ -42,6 +49,8 @@ def labeling_status(db: Session = Depends(get_db)):
 
     return LabelingStatus(
         frames_total=annotated + skipped + pending + missing,
+        source_videos_total=source_videos_total,
+        source_videos_labeled=source_videos_labeled,
         annotated=annotated,
         skipped=skipped,
         pending=pending,

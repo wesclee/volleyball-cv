@@ -64,6 +64,11 @@ class RallyUpdate(BaseModel):
     end_time: float | None = None
 
 
+class RallyCreate(BaseModel):
+    start_time: float = Field(ge=0.0)
+    end_time: float = Field(ge=0.0)
+
+
 class ProcessedVideoRead(BaseModel):
     id: int
     match_id: int
@@ -87,6 +92,10 @@ class LabeledFrameRead(BaseModel):
     pred_w: float | None
     pred_h: float | None
     pred_conf: float | None
+    label_cx: float | None
+    label_cy: float | None
+    label_w: float | None
+    label_h: float | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -127,6 +136,7 @@ class BootstrapExtractRequest(BaseModel):
     split_train: float = 0.8
     split_val: float = 0.1
     split_test: float = 0.1
+    whole_video: bool = False
 
 
 class AnnotateRequest(BaseModel):
@@ -153,6 +163,8 @@ class LabelingStatus(BaseModel):
     model_config = {"protected_namespaces": ()}
 
     frames_total: int
+    source_videos_total: int
+    source_videos_labeled: int
     annotated: int
     skipped: int
     pending: int
