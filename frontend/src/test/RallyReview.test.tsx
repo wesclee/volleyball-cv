@@ -11,7 +11,11 @@ vi.mock('../api/client')
 
 const MATCH: Match = { id: 1, date: '2026-05-18', opponent: null, venue: null, notes: null, created_at: '' }
 const VIDEO: Video = { id: 10, match_id: 1, set_number: 1, raw_path: '/uploads/s.mp4', status: 'done', duration: 600, created_at: '' }
-const RALLY: Rally = { id: 20, video_id: 10, start_time: 30.0, end_time: 65.0, score_home: null, score_away: null, confidence: 1.0 }
+const RALLY: Rally = { id: 20, video_id: 10, start_time: 30.0, end_time: 65.0, score_home: null, score_away: null, split: null, confidence: 1.0 }
+const SCORED_RALLIES: Rally[] = [
+  { ...RALLY, id: 20, score_home: 1, score_away: 0 },
+  { ...RALLY, id: 21, start_time: 80, end_time: 100, score_home: 1, score_away: 1 },
+]
 
 function renderWithRoute(matchId = '1') {
   return render(
@@ -23,11 +27,19 @@ function renderWithRoute(matchId = '1') {
   )
 }
 
+async function selectFirstScoreBlock(user: ReturnType<typeof userEvent.setup>) {
+  const rallyOneBlocks = await screen.findAllByTitle(/Rally 1/)
+  const scoreBlock = rallyOneBlocks.find(block => block.textContent?.includes('R1'))
+  if (!scoreBlock) throw new Error('Score block not found')
+  await user.click(scoreBlock)
+}
+
 describe('RallyReview', () => {
   beforeEach(() => {
     vi.mocked(api.getMatch).mockResolvedValue(MATCH)
     vi.mocked(api.getMatchVideos).mockResolvedValue([VIDEO])
     vi.mocked(api.getRallies).mockResolvedValue([RALLY])
+    vi.mocked(api.getAudioPeaks).mockResolvedValue({ video_id: 10, buckets: 4, peaks: [0.1, 1, 0.2, 0.4] })
     vi.mocked(api.patchRally).mockResolvedValue({ ...RALLY, score_home: 1, score_away: 0 })
     vi.mocked(api.createRally).mockResolvedValue({ ...RALLY, id: 21, start_time: 70, end_time: 80 })
     vi.mocked(api.deleteRally).mockResolvedValue(undefined)
@@ -40,8 +52,9 @@ describe('RallyReview', () => {
   })
 
   it('renders rally with timestamps as editable inputs', async () => {
+    const user = userEvent.setup()
     renderWithRoute()
-    // Timestamps render inside <input type="number">, not as text nodes
+    await selectFirstScoreBlock(user)
     await screen.findByDisplayValue('30')
     expect(screen.getByDisplayValue('65')).toBeInTheDocument()
   })
@@ -49,7 +62,7 @@ describe('RallyReview', () => {
   it('clicking Home Scored patches rally score_home', async () => {
     const user = userEvent.setup()
     renderWithRoute()
-    await screen.findByDisplayValue('30')
+    await selectFirstScoreBlock(user)
     await user.click(screen.getByRole('button', { name: /home scored/i }))
     await waitFor(() => expect(api.patchRally).toHaveBeenCalledWith(20, expect.objectContaining({ score_home: 1 })))
   })
@@ -57,7 +70,7 @@ describe('RallyReview', () => {
   it('clicking Away Scored patches rally score_away', async () => {
     const user = userEvent.setup()
     renderWithRoute()
-    await screen.findByDisplayValue('30')
+    await selectFirstScoreBlock(user)
     await user.click(screen.getByRole('button', { name: /away scored/i }))
     await waitFor(() => expect(api.patchRally).toHaveBeenCalledWith(20, expect.objectContaining({ score_away: 1 })))
   })
@@ -79,13 +92,39 @@ describe('RallyReview', () => {
     media.currentTime = 80
     await user.click(screen.getByRole('button', { name: /^mark end$/i }))
     await waitFor(() => expect(api.createRally).toHaveBeenCalledWith(10, { start_time: 70, end_time: 80 }))
+    expect(media.currentTime).toBe(80)
   })
 
   it('deletes a bad rally', async () => {
     const user = userEvent.setup()
     renderWithRoute()
-    await screen.findByDisplayValue('30')
+    await selectFirstScoreBlock(user)
     await user.click(screen.getByRole('button', { name: /delete/i }))
     await waitFor(() => expect(api.deleteRally).toHaveBeenCalledWith(20))
+  })
+
+  it('shows editor timeline navigation for marked and unmarked sections', async () => {
+    const user = userEvent.setup()
+    renderWithRoute()
+    await screen.findByText(/rally timeline/i)
+    expect(screen.getByText(/1 marked · 2 unmarked/i)).toBeInTheDocument()
+
+    const media = document.querySelector('video') as HTMLVideoElement
+    Object.defineProperty(media, 'currentTime', { value: 0, writable: true })
+    await user.click(screen.getByRole('button', { name: /next unmarked/i }))
+    expect(media.currentTime).toBe(65)
+
+    await user.click(screen.getByRole('button', { name: /last label end/i }))
+    expect(media.currentTime).toBe(65)
+  })
+
+  it('renders rally score blocks left to right', async () => {
+    vi.mocked(api.getRallies).mockResolvedValue(SCORED_RALLIES)
+    renderWithRoute()
+    const rallyOneBlocks = await screen.findAllByTitle(/Rally 1/)
+    const scoreBlockOne = rallyOneBlocks.find(block => block.textContent?.includes('R1'))
+    const scoreBlockTwo = screen.getAllByTitle(/Rally 2/).find(block => block.textContent?.includes('R2'))
+    expect(scoreBlockOne).toHaveTextContent('1-0')
+    expect(scoreBlockTwo).toHaveTextContent('1-1')
   })
 })

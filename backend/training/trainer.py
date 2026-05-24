@@ -13,6 +13,10 @@ from backend.models.match import FrameStatus, FrameSplit, LabeledFrame, ModelVer
 from backend.training.reconciler import reconcile
 
 
+class TrainingCancelled(Exception):
+    pass
+
+
 def run_training(run_id: int, epochs: int, db_url: str) -> None:
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
     try:
@@ -21,10 +25,18 @@ def run_training(run_id: int, epochs: int, db_url: str) -> None:
             if not run:
                 return
             run.status = TrainingStatus.running
+            run.progress_pct = 1.0
             db.commit()
             try:
                 _do_train(run, epochs, db)
-                run.status = TrainingStatus.done
+                if run.stop_requested:
+                    run.status = TrainingStatus.cancelled
+                    run.progress_pct = min(run.progress_pct or 0.0, 99.0)
+                else:
+                    run.status = TrainingStatus.done
+                    run.progress_pct = 100.0
+            except TrainingCancelled:
+                run.status = TrainingStatus.cancelled
             except Exception:
                 run.status = TrainingStatus.error
                 run.error = traceback.format_exc()[:2000]
@@ -38,6 +50,8 @@ def _do_train(run: TrainingRun, epochs: int, db) -> None:
     import datetime
 
     reconcile(db)
+    _check_cancelled(run, db)
+    _set_progress(run, db, 5.0)
 
     for split in ("train", "val", "test"):
         (DATASET_DIR / "images" / split).mkdir(parents=True, exist_ok=True)
@@ -48,7 +62,8 @@ def _do_train(run: TrainingRun, epochs: int, db) -> None:
     ).all()
 
     frames_used = 0
-    for frame in frames:
+    for index, frame in enumerate(frames):
+        _check_cancelled(run, db)
         img_src = Path(frame.img_path)
         if not img_src.exists():
             continue
@@ -65,9 +80,13 @@ def _do_train(run: TrainingRun, epochs: int, db) -> None:
             label_dst.write_text("")
         if frame.split == FrameSplit.train:
             frames_used += 1
+        if frames and index % 25 == 0:
+            _set_progress(run, db, 5.0 + 15.0 * ((index + 1) / len(frames)))
 
     run.frames_used = frames_used
+    run.progress_pct = 20.0
     db.commit()
+    _check_cancelled(run, db)
 
     yaml_path = DATASET_DIR / "data.yaml"
     yaml_path.write_text(
@@ -82,6 +101,13 @@ def _do_train(run: TrainingRun, epochs: int, db) -> None:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     t_start = time.time()
     model = YOLO("yolov8n.pt")
+
+    def on_train_epoch_end(trainer):
+        epoch_index = getattr(trainer, "epoch", 0) + 1
+        _set_progress(run, db, min(90.0, 20.0 + 70.0 * (epoch_index / max(epochs, 1))))
+        _check_cancelled(run, db)
+
+    model.add_callback("on_train_epoch_end", on_train_epoch_end)
     results = model.train(
         data=str(yaml_path),
         epochs=epochs,
@@ -91,10 +117,14 @@ def _do_train(run: TrainingRun, epochs: int, db) -> None:
         name=f"run_{run.id}",
         exist_ok=True,
     )
+    _check_cancelled(run, db)
+    _set_progress(run, db, 92.0)
 
     best_weights = MODELS_DIR / f"run_{run.id}" / "weights" / "best.pt"
     eval_model = YOLO(str(best_weights))
     metrics = eval_model.val(data=str(yaml_path), split="test", verbose=False)
+    _check_cancelled(run, db)
+    _set_progress(run, db, 97.0)
 
     run.epochs = epochs
     run.final_loss = float(results.results_dict.get("train/box_loss", 0.0))
@@ -113,3 +143,19 @@ def _do_train(run: TrainingRun, epochs: int, db) -> None:
     db.flush()
     run.new_model_id = mv.id
     db.commit()
+
+
+def _set_progress(run: TrainingRun, db, progress_pct: float) -> None:
+    db.refresh(run)
+    if run.status != TrainingStatus.stopping:
+        run.status = TrainingStatus.running
+    run.progress_pct = max(run.progress_pct or 0.0, progress_pct)
+    db.commit()
+
+
+def _check_cancelled(run: TrainingRun, db) -> None:
+    db.refresh(run)
+    if run.stop_requested:
+        run.status = TrainingStatus.cancelled
+        db.commit()
+        raise TrainingCancelled()

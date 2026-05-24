@@ -34,6 +34,12 @@ class VideoRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RallyFootageRead(BaseModel):
+    match: MatchRead
+    video: VideoRead
+    rally_count: int
+
+
 class JobRead(BaseModel):
     id: int
     video_id: int
@@ -52,6 +58,7 @@ class RallyRead(BaseModel):
     end_time: float
     score_home: int | None
     score_away: int | None
+    split: FrameSplit | None
     confidence: float
 
     model_config = {"from_attributes": True}
@@ -118,6 +125,8 @@ class ModelVersionRead(BaseModel):
 class TrainingRunRead(BaseModel):
     id: int
     status: TrainingStatus
+    progress_pct: float
+    stop_requested: bool
     base_model_id: int | None
     new_model_id: int | None
     frames_used: int | None
@@ -148,6 +157,98 @@ class AnnotateRequest(BaseModel):
 
 class TrainingRunRequest(BaseModel):
     epochs: int = 50
+
+
+class RallyDatasetRequest(BaseModel):
+    split_train: float = 0.8
+    split_val: float = 0.1
+    split_test: float = 0.1
+    min_gap_s: float = Field(default=1.0, ge=0.0)
+
+
+class RallyDatasetRead(BaseModel):
+    task: str
+    labels: list[str]
+    split_ratios: dict[str, float]
+    counts: dict[str, int]
+    positive_rallies: int
+    negative_gaps: int
+    dataset_path: str
+    split_source: str | None = None
+    built_at: str | None = None
+
+
+class RallyTrainingRunRequest(BaseModel):
+    epochs: int = Field(default=25, ge=1, le=500)
+
+
+class RallyTrainingRunRead(BaseModel):
+    id: int
+    status: TrainingStatus
+    progress_pct: float
+    stop_requested: bool
+    new_model_id: int | None
+    examples_used: int | None
+    epochs: int | None
+    final_loss: float | None
+    duration_s: float | None
+    error: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RallyModelVersionRead(BaseModel):
+    model_config = {"from_attributes": True, "protected_namespaces": ()}
+
+    id: int
+    name: str
+    model_path: str
+    dataset_size: int
+    test_precision: float | None
+    test_recall: float | None
+    test_map50: float | None
+    mean_temporal_iou: float | None
+    is_active: bool
+    created_at: datetime
+
+
+class RallyPredictionRead(BaseModel):
+    start_time: float
+    end_time: float
+    confidence: float
+    source_model_id: int
+
+
+class RallyScanRead(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    video_id: int
+    model_id: int
+    model_name: str
+    window_s: float
+    step_s: float
+    threshold: float
+    windows_scanned: int
+    predictions: list[RallyPredictionRead]
+
+
+class RallyScanRunRead(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    id: int
+    video_id: int
+    model_id: int
+    status: JobStatus
+    progress_pct: float
+    window_s: float
+    step_s: float
+    threshold: float | None
+    max_predictions: int
+    windows_scanned: int
+    predictions: list[RallyPredictionRead]
+    error: str | None
+    created_at: datetime
 
 
 

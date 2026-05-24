@@ -1,6 +1,6 @@
 // frontend/src/api/client.ts
 import type {
-  AnnotateBbox, Job, LabeledFrame, LabelingStatus, Match, MatchCreate, ModelVersion, ProcessedVideo, Rally, RallyCreate, RallyUpdate, ReconcileResult, TrainingRun, Video,
+  AnnotateBbox, Job, LabeledFrame, LabelingStatus, Match, MatchCreate, ModelVersion, ProcessedVideo, Rally, RallyCreate, RallyDataset, RallyFootage, RallyModelVersion, RallyPrediction, RallyScanResult, RallyScanRun, RallyTrainingRun, RallyUpdate, ReconcileResult, TrainingRun, Video,
 } from '../types'
 
 const BASE = 'http://localhost:8000'
@@ -108,6 +108,10 @@ export function processVideo(videoId: number): Promise<Job> {
   return request(`/videos/${videoId}/process`, { method: 'POST' })
 }
 
+export function getAudioPeaks(videoId: number, buckets = 240): Promise<{ video_id: number; buckets: number; peaks: number[] }> {
+  return request(`/videos/${videoId}/audio-peaks?buckets=${buckets}`)
+}
+
 export function getJob(jobId: number): Promise<Job> {
   return request(`/jobs/${jobId}`)
 }
@@ -134,6 +138,114 @@ export function patchRally(rallyId: number, data: RallyUpdate): Promise<Rally> {
 
 export function deleteRally(rallyId: number): Promise<void> {
   return request(`/rallies/${rallyId}`, { method: 'DELETE' })
+}
+
+export function scanVideoForRallies(videoId: number, opts: {
+  window_s?: number
+  step_s?: number
+  threshold?: number
+  max_predictions?: number
+} = {}): Promise<RallyScanResult> {
+  const qs = new URLSearchParams(
+    Object.fromEntries(
+      Object.entries(opts)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    ),
+  ).toString()
+  return request(`/videos/${videoId}/rally-scan${qs ? '?' + qs : ''}`, { method: 'POST' })
+}
+
+export function startRallyScan(videoId: number, opts: {
+  window_s?: number
+  step_s?: number
+  threshold?: number
+  max_predictions?: number
+} = {}): Promise<{ scan_id: number }> {
+  const qs = new URLSearchParams(
+    Object.fromEntries(
+      Object.entries(opts)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    ),
+  ).toString()
+  return request(`/videos/${videoId}/rally-scan-jobs${qs ? '?' + qs : ''}`, { method: 'POST' })
+}
+
+export function getRallyScan(scanId: number): Promise<RallyScanRun> {
+  return request(`/rally-scan-jobs/${scanId}`)
+}
+
+export async function saveRallyPrediction(videoId: number, prediction: RallyPrediction): Promise<Rally> {
+  return createRally(videoId, { start_time: prediction.start_time, end_time: prediction.end_time })
+}
+
+export function getRallyFootage(): Promise<RallyFootage[]> {
+  return request('/rally-labels/footage')
+}
+
+export function getRallyTrainingDataset(): Promise<RallyDataset> {
+  return request('/rally-labels/training-dataset')
+}
+
+export function uploadRallyFootage(
+  file: File,
+  label?: string,
+  onProgress?: (pct: number) => void,
+): Promise<RallyFootage> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (label) form.append('label', label)
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${BASE}/rally-labels/footage`)
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable) onProgress?.(e.loaded / e.total * 100)
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText) as RallyFootage)
+      } else {
+        reject(new Error(`${xhr.status} ${xhr.responseText}`))
+      }
+    }
+    xhr.onerror = () => reject(new Error('Network error'))
+    xhr.send(form)
+  })
+}
+
+export function buildRallyTrainingDataset(opts: {
+  split_train?: number
+  split_val?: number
+  split_test?: number
+  min_gap_s?: number
+} = {}): Promise<RallyDataset> {
+  return request('/rally-labels/training-dataset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  })
+}
+
+export function startRallyTraining(epochs = 25): Promise<{ run_id: number }> {
+  return request('/rally-labels/training/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ epochs }),
+  })
+}
+
+export function getRallyTrainingRun(runId: number): Promise<RallyTrainingRun> {
+  return request(`/rally-labels/training/runs/${runId}`)
+}
+
+export function stopRallyTrainingRun(runId: number): Promise<RallyTrainingRun> {
+  return request(`/rally-labels/training/runs/${runId}/stop`, { method: 'POST' })
+}
+
+export function getRallyModels(): Promise<RallyModelVersion[]> {
+  return request('/rally-labels/models')
 }
 
 export function exportMatch(matchId: number): Promise<ProcessedVideo[]> {
@@ -196,6 +308,10 @@ export function startTraining(epochs = 50): Promise<{ run_id: number }> {
 
 export function getTrainingRun(runId: number): Promise<TrainingRun> {
   return request(`/training/runs/${runId}`)
+}
+
+export function stopTrainingRun(runId: number): Promise<TrainingRun> {
+  return request(`/training/runs/${runId}/stop`, { method: 'POST' })
 }
 
 export function getModels(): Promise<ModelVersion[]> {

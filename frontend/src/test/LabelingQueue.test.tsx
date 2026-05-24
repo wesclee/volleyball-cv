@@ -17,6 +17,7 @@ vi.mock('../api/client', () => ({
   deleteTrainingVideo: vi.fn().mockResolvedValue(undefined),
   startExtraction: vi.fn().mockResolvedValue({ video_id: 1 }),
   startTraining: vi.fn().mockResolvedValue({ run_id: 1 }),
+  stopTrainingRun: vi.fn(),
   getTrainingRun: vi.fn(),
   getModels: vi.fn(),
   promoteModel: vi.fn(),
@@ -153,7 +154,7 @@ describe('LabelingQueue — active review mode', () => {
       ...withModelStatus, retrain_recommended: true,
     })
     vi.mocked(client.getTrainingRun).mockResolvedValue({
-      id: 1, status: 'pending', base_model_id: null, new_model_id: null,
+      id: 1, status: 'pending', progress_pct: 0, stop_requested: false, base_model_id: null, new_model_id: null,
       frames_used: null, epochs: null, final_loss: null, duration_s: null,
       error: null, created_at: '2026-01-01T00:00:00',
     })

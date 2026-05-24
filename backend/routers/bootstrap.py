@@ -25,6 +25,7 @@ from backend.schemas.match import (
 from backend.training.frame_extractor import extract_frames
 from backend.training.reconciler import reconcile
 from backend.training.trainer import run_training
+from backend.upload_hashes import backfill_video_hashes, find_duplicate_video, hash_upload
 
 
 router = APIRouter()
@@ -82,6 +83,15 @@ def upload_training_video(
     label: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
+    content_hash = hash_upload(file)
+    backfill_video_hashes(db, TRAINING_MATCH_NOTE)
+    duplicate = find_duplicate_video(db, content_hash, TRAINING_MATCH_NOTE)
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail=f"this training footage is already uploaded as video {duplicate.id}",
+        )
+
     training_match = Match(
         date=date.today().isoformat(),
         opponent=label or "Training footage",
@@ -99,6 +109,7 @@ def upload_training_video(
         match_id=training_match.id,
         set_number=1,
         raw_path=str(dest),
+        content_hash=content_hash,
         status=VideoStatus.done,
     )
     db.add(video)
@@ -232,7 +243,7 @@ def start_training_run(
             detail=f"need at least {MIN_FRAMES} annotated frames, have {annotated_count}",
         )
     in_progress = db.query(TrainingRun).filter(
-        TrainingRun.status.in_([TrainingStatus.pending, TrainingStatus.running])
+        TrainingRun.status.in_([TrainingStatus.pending, TrainingStatus.running, TrainingStatus.stopping])
     ).first()
     if in_progress:
         raise HTTPException(status_code=409, detail="a training run is already in progress")
@@ -249,6 +260,20 @@ def get_training_run(run_id: int, db: Session = Depends(get_db)):
     run = db.get(TrainingRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="training run not found")
+    return run
+
+
+@router.post("/training/runs/{run_id}/stop", response_model=TrainingRunRead)
+def stop_training_run(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(TrainingRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="training run not found")
+    if run.status not in (TrainingStatus.pending, TrainingStatus.running, TrainingStatus.stopping):
+        return run
+    run.stop_requested = True
+    run.status = TrainingStatus.stopping
+    db.commit()
+    db.refresh(run)
     return run
 
 

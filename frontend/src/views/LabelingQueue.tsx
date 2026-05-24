@@ -4,7 +4,7 @@ import type { AnnotateBbox, LabeledFrame, LabelingStatus, ModelVersion, Training
 import {
   annotateFrame, deleteTrainingVideo, getAllVideos, getLabelingStatus, getLabelingQueue, getFrames,
   getFrameImageUrl, getModels, getTrainingRun, getTrainingVideos, promoteModel, skipFrame, startExtraction,
-  startTraining, uploadTrainingVideo,
+  startTraining, stopTrainingRun, uploadTrainingVideo,
 } from '../api/client'
 
 interface Rect { x: number; y: number; w: number; h: number }
@@ -581,13 +581,14 @@ export function PromotionPanel({
 function TrainingPanel({ runId, onDone }: { runId: number; onDone: () => void }) {
   const [run, setRun] = useState<TrainingRun | null>(null)
   const [models, setModels] = useState<ModelVersion[]>([])
+  const [stopError, setStopError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!run || run.status === 'running' || run.status === 'pending') {
+    if (!run || run.status === 'running' || run.status === 'pending' || run.status === 'stopping') {
       const id = setInterval(async () => {
         const r = await getTrainingRun(runId)
         setRun(r)
-        if (r.status === 'done' || r.status === 'error') {
+        if (['done', 'error', 'cancelled'].includes(r.status)) {
           clearInterval(id)
           const ms = await getModels()
           setModels(ms)
@@ -595,7 +596,7 @@ function TrainingPanel({ runId, onDone }: { runId: number; onDone: () => void })
       }, 3000)
       getTrainingRun(runId).then(r => {
         setRun(r)
-        if (r.status === 'done' || r.status === 'error') {
+        if (['done', 'error', 'cancelled'].includes(r.status)) {
           getModels().then(setModels)
         }
       })
@@ -603,15 +604,56 @@ function TrainingPanel({ runId, onDone }: { runId: number; onDone: () => void })
     }
   }, [runId])
 
+  const requestStop = async () => {
+    setStopError(null)
+    try {
+      const updated = await stopTrainingRun(runId)
+      setRun(updated)
+    } catch (e: unknown) {
+      setStopError(e instanceof Error ? e.message : 'Failed to stop training')
+    }
+  }
+
   const newModel = run?.new_model_id ? models.find(m => m.id === run.new_model_id) : undefined
   const oldModel = models.find(m => m.is_active && m.id !== run?.new_model_id) ?? null
 
   if (!run || run.status === 'pending' || run.status === 'running') {
+    const progress = Math.max(0, Math.min(100, run?.progress_pct ?? 0))
     return (
-      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded flex items-center gap-3">
-        <span className="text-blue-700 font-medium">Training run #{runId}</span>
-        <span className="text-blue-600 font-mono text-sm">{run?.status ?? 'starting…'}</span>
-        <span className="text-blue-500 text-sm">— you can keep annotating</span>
+      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <span className="text-blue-700 font-medium">Training run #{runId}</span>
+            <span className="ml-3 text-blue-600 font-mono text-sm">{run?.status ?? 'starting...'}</span>
+          </div>
+          <button onClick={requestStop} className="rounded bg-white px-3 py-1 text-sm font-medium text-blue-700 ring-1 ring-blue-200 hover:bg-blue-100">
+            Safe Stop
+          </button>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded bg-blue-100">
+          <div className="h-full rounded bg-blue-600 transition-all" style={{ width: `${progress}%` }} />
+        </div>
+        <p className="mt-1 text-xs text-blue-600">{progress.toFixed(0)}% complete. You can keep annotating while it runs.</p>
+        {stopError && <p className="mt-2 text-xs text-red-600">{stopError}</p>}
+      </div>
+    )
+  }
+
+  if (run.status === 'stopping') {
+    return (
+      <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded">
+        <p className="text-amber-800 font-medium">Training run #{runId} is stopping safely...</p>
+        <p className="text-xs text-amber-700 mt-1">The current safe point will finish, then the run will be marked cancelled.</p>
+      </div>
+    )
+  }
+
+  if (run.status === 'cancelled') {
+    return (
+      <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded">
+        <p className="text-gray-800 font-medium">Training run #{runId} was stopped.</p>
+        <p className="text-xs text-gray-600 mt-1">Your labels and dataset files were kept.</p>
+        <button onClick={onDone} className="mt-2 px-3 py-1 bg-gray-600 text-white text-sm rounded">Dismiss</button>
       </div>
     )
   }

@@ -2,7 +2,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum as SAEnum, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base
@@ -38,6 +38,8 @@ class FrameStatus(str, enum.Enum):
 class TrainingStatus(str, enum.Enum):
     pending = "pending"
     running = "running"
+    stopping = "stopping"
+    cancelled = "cancelled"
     done = "done"
     error = "error"
 
@@ -60,6 +62,7 @@ class Video(Base):
     match_id: Mapped[int] = mapped_column(ForeignKey("matches.id"))
     set_number: Mapped[int] = mapped_column(Integer)
     raw_path: Mapped[str] = mapped_column(String(500))
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[VideoStatus] = mapped_column(SAEnum(VideoStatus), default=VideoStatus.pending)
     duration: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -88,6 +91,7 @@ class Rally(Base):
     end_time: Mapped[float] = mapped_column(Float)
     score_home: Mapped[int | None] = mapped_column(Integer)
     score_away: Mapped[int | None] = mapped_column(Integer)
+    split: Mapped[FrameSplit | None] = mapped_column(SAEnum(FrameSplit), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     video: Mapped["Video"] = relationship(back_populates="rallies")
 
@@ -172,11 +176,59 @@ class TrainingRun(Base):
     __tablename__ = "training_runs"
     id: Mapped[int] = mapped_column(primary_key=True)
     status: Mapped[TrainingStatus] = mapped_column(SAEnum(TrainingStatus), default=TrainingStatus.pending)
+    progress_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     base_model_id: Mapped[int | None] = mapped_column(ForeignKey("model_versions.id"), nullable=True)
     new_model_id: Mapped[int | None] = mapped_column(ForeignKey("model_versions.id"), nullable=True)
     frames_used: Mapped[int | None] = mapped_column(Integer)
     epochs: Mapped[int | None] = mapped_column(Integer)
     final_loss: Mapped[float | None] = mapped_column(Float)
     duration_s: Mapped[float | None] = mapped_column(Float)
+    error: Mapped[str | None] = mapped_column(String(2000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RallyModelVersion(Base):
+    __tablename__ = "rally_model_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    model_path: Mapped[str] = mapped_column(String(500))
+    dataset_size: Mapped[int] = mapped_column(Integer)
+    test_precision: Mapped[float | None] = mapped_column(Float)
+    test_recall: Mapped[float | None] = mapped_column(Float)
+    test_map50: Mapped[float | None] = mapped_column(Float)
+    mean_temporal_iou: Mapped[float | None] = mapped_column(Float)
+    is_active: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RallyTrainingRun(Base):
+    __tablename__ = "rally_training_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[TrainingStatus] = mapped_column(SAEnum(TrainingStatus), default=TrainingStatus.pending)
+    progress_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    new_model_id: Mapped[int | None] = mapped_column(ForeignKey("rally_model_versions.id"), nullable=True)
+    examples_used: Mapped[int | None] = mapped_column(Integer)
+    epochs: Mapped[int | None] = mapped_column(Integer)
+    final_loss: Mapped[float | None] = mapped_column(Float)
+    duration_s: Mapped[float | None] = mapped_column(Float)
+    error: Mapped[str | None] = mapped_column(String(2000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RallyScanRun(Base):
+    __tablename__ = "rally_scan_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    video_id: Mapped[int] = mapped_column(ForeignKey("videos.id"))
+    model_id: Mapped[int] = mapped_column(ForeignKey("rally_model_versions.id"))
+    status: Mapped[JobStatus] = mapped_column(SAEnum(JobStatus), default=JobStatus.pending)
+    progress_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    window_s: Mapped[float] = mapped_column(Float)
+    step_s: Mapped[float] = mapped_column(Float)
+    threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_predictions: Mapped[int] = mapped_column(Integer)
+    windows_scanned: Mapped[int] = mapped_column(Integer, default=0)
+    predictions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(String(2000))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

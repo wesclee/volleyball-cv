@@ -1,8 +1,10 @@
 # backend/routers/videos.py
 import shutil
+import subprocess
+from array import array
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from backend.config import DATABASE_URL, UPLOADS_DIR
@@ -54,3 +56,53 @@ def process_video(
 
     background_tasks.add_task(run_processing, job.id, DATABASE_URL)
     return job
+
+
+@router.get("/videos/{video_id}/audio-peaks")
+def audio_peaks(
+    video_id: int,
+    buckets: int = Query(default=240, ge=32, le=1200),
+    db: Session = Depends(get_db),
+):
+    video = db.get(Video, video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    peaks = extract_audio_peaks(Path(video.raw_path), buckets)
+    return {"video_id": video_id, "buckets": len(peaks), "peaks": peaks}
+
+
+def extract_audio_peaks(video_path: Path, buckets: int) -> list[float]:
+    command = [
+        "ffmpeg",
+        "-v", "error",
+        "-i", str(video_path),
+        "-vn",
+        "-ac", "1",
+        "-ar", "8000",
+        "-f", "f32le",
+        "pipe:1",
+    ]
+    try:
+        result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except (subprocess.CalledProcessError, FileNotFoundError, PermissionError):
+        return []
+
+    samples = array("f")
+    samples.frombytes(result.stdout)
+    if not samples:
+        return []
+
+    samples_per_bucket = max(1, len(samples) // buckets)
+    peaks: list[float] = []
+    max_peak = 0.0
+    for bucket in range(buckets):
+        start = bucket * samples_per_bucket
+        end = len(samples) if bucket == buckets - 1 else min(len(samples), start + samples_per_bucket)
+        peak = max((abs(sample) for sample in samples[start:end]), default=0.0)
+        peaks.append(peak)
+        max_peak = max(max_peak, peak)
+
+    if max_peak == 0:
+        return peaks
+    return [peak / max_peak for peak in peaks]

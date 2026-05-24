@@ -26,6 +26,85 @@ export interface Video {
   created_at: string
 }
 
+export interface RallyFootage {
+  match: Match
+  video: Video
+  rally_count: number
+}
+
+export interface RallyDataset {
+  task: string
+  labels: string[]
+  split_ratios: Record<string, number>
+  counts: Record<string, number>
+  positive_rallies: number
+  negative_gaps: number
+  dataset_path: string
+  split_source?: string | null
+  built_at?: string | null
+}
+
+export interface RallyModelVersion {
+  id: number
+  name: string
+  model_path: string
+  dataset_size: number
+  test_precision: number | null
+  test_recall: number | null
+  test_map50: number | null
+  mean_temporal_iou: number | null
+  is_active: boolean
+  created_at: string
+}
+
+export interface RallyTrainingRun {
+  id: number
+  status: TrainingStatus
+  progress_pct: number
+  stop_requested: boolean
+  new_model_id: number | null
+  examples_used: number | null
+  epochs: number | null
+  final_loss: number | null
+  duration_s: number | null
+  error: string | null
+  created_at: string
+}
+
+export interface RallyPrediction {
+  start_time: number
+  end_time: number
+  confidence: number
+  source_model_id: number
+}
+
+export interface RallyScanResult {
+  video_id: number
+  model_id: number
+  model_name: string
+  window_s: number
+  step_s: number
+  threshold: number
+  windows_scanned: number
+  predictions: RallyPrediction[]
+}
+
+export interface RallyScanRun {
+  id: number
+  video_id: number
+  model_id: number
+  status: 'pending' | 'running' | 'done' | 'error'
+  progress_pct: number
+  window_s: number
+  step_s: number
+  threshold: number | null
+  max_predictions: number
+  windows_scanned: number
+  predictions: RallyPrediction[]
+  error: string | null
+  created_at: string
+}
+
 export interface Job {
   id: number
   video_id: number
@@ -42,6 +121,7 @@ export interface Rally {
   end_time: number
   score_home: number | null
   score_away: number | null
+  split: FrameSplit | null
   confidence: number
 }
 
@@ -66,7 +146,7 @@ export interface ProcessedVideo {
 
 export type FrameSplit = 'train' | 'val' | 'test'
 export type FrameStatus = 'pending' | 'annotated' | 'skipped' | 'missing'
-export type TrainingStatus = 'pending' | 'running' | 'done' | 'error'
+export type TrainingStatus = 'pending' | 'running' | 'stopping' | 'cancelled' | 'done' | 'error'
 
 export interface LabeledFrame {
   id: number
@@ -104,6 +184,8 @@ export interface ModelVersion {
 export interface TrainingRun {
   id: number
   status: TrainingStatus
+  progress_pct: number
+  stop_requested: boolean
   base_model_id: number | null
   new_model_id: number | null
   frames_used: number | null

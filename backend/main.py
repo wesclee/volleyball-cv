@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 import backend.models  # noqa — registers all ORM models with Base
 from backend.config import EXPORTS_DIR, FRAMES_DIR, UPLOADS_DIR
 from backend.database import Base, engine
+from backend.migrations import ensure_schema_compatibility
 from backend.routers import matches, videos, jobs, rallies, bootstrap
 from backend.routers.labeling import router as labeling_router
 
@@ -15,6 +16,7 @@ from backend.routers.labeling import router as labeling_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
+    ensure_schema_compatibility(engine)
     yield
 
 
